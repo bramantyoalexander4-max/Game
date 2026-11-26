@@ -147,3 +147,10 @@ tr.me td { background: #24452f; font-weight: 700; }
 .stars { color: var(--accent2); letter-spacing: 1px; font-size: 12px; }
 .chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 8px; }
 .chips .btn { flex: none; padding: 7px 12px; font-size: 13px; }
+
+/* promotion / relegation zones */
+tr.zone-up td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+tr.zone-down td:first-child { box-shadow: inset 3px 0 0 var(--bad); }
+.key { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 5px 0 0; vertical-align: middle; }
+.key.up { background: var(--accent); } .key.down { background: var(--bad); margin-left: 4px; }
+.ev.pen { background: #2a2f1c; }

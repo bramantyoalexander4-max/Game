@@ -2,7 +2,7 @@
 (function (root) {
   'use strict';
 
-  const SAVE_VERSION = 1;
+  const SAVE_VERSION = 2;
   let G = null; // current game state
 
   // ---------- random ----------
@@ -39,7 +39,20 @@
     { name: 'Highmoor Forge', short: 'HIG', color: '#ef6c00', rep: 65 },
     { name: 'Lowfield Saints', short: 'LOW', color: '#283593', rep: 63 },
     { name: 'Saltmarsh Vale', short: 'SAL', color: '#4e342e', rep: 61 },
-  ];
+    // Division 2
+    { name: 'Ashcombe Rangers', short: 'ASH', color: '#00695c', rep: 60, div: 2 },
+    { name: 'Brindle Port', short: 'BRI', color: '#5d4037', rep: 59, div: 2 },
+    { name: 'Corrin Heath', short: 'COR', color: '#8e24aa', rep: 58, div: 2 },
+    { name: 'Dovermere', short: 'DOV', color: '#0277bd', rep: 57, div: 2 },
+    { name: 'Eastwick Rail', short: 'EAS', color: '#b71c1c', rep: 56, div: 2 },
+    { name: 'Foxley Dynamos', short: 'FOX', color: '#e65100', rep: 55, div: 2 },
+    { name: 'Gullhaven', short: 'GUL', color: '#546e7a', rep: 54, div: 2 },
+    { name: 'Hartwell Colliery', short: 'HAR', color: '#212121', rep: 53, div: 2 },
+    { name: 'Ivel Wolves', short: 'IVE', color: '#9e9d24', rep: 52, div: 2 },
+    { name: 'Juniper Park', short: 'JUN', color: '#2e7d32', rep: 51, div: 2 },
+    { name: 'Kilnworth', short: 'KIL', color: '#c2185b', rep: 50, div: 2 },
+    { name: 'Larkspur Borough', short: 'LAR', color: '#3949ab', rep: 49, div: 2 },
+  ].map((c) => ({ div: 1, ...c }));
 
   const FIRST = ['Aled', 'Bram', 'Caio', 'Dario', 'Emeka', 'Finn', 'Goran', 'Hugo', 'Ivo', 'Jonas', 'Kofi', 'Luca',
     'Mateo', 'Nils', 'Omar', 'Pavel', 'Quinn', 'Rafa', 'Sami', 'Teo', 'Udo', 'Viktor', 'Wes', 'Yuri', 'Zane',
@@ -74,6 +87,13 @@
   const SQUAD_TEMPLATE = { GK: 2, DF: 7, MF: 8, FW: 5 };
   const MIN_SQUAD = 16, MAX_SQUAD = 30;
   const PRIZES = [9e6, 7e6, 5.5e6, 4.5e6, 3.8e6, 3.2e6, 2.7e6, 2.3e6, 2e6, 1.7e6, 1.4e6, 1.2e6];
+  const DIV2_PRIZE_SHARE = 0.3;
+  const PROMOTED = 2; // clubs swapping divisions each season
+  const CUP_NAME = 'Shield Cup';
+  const CUP_ROUNDS = ['First round', 'Round of 16', 'Quarter-final', 'Semi-final', 'Final'];
+  const CUP_AFTER = [3, 8, 13, 17, 22]; // each cup round is played after this many league matchdays
+  const CUP_PRIZE = [150000, 300000, 600000, 1200000, 3000000]; // for winning a tie in that round
+  const CUP_BYES = 8; // strongest top-flight clubs skip the first round
 
   // ---------- players ----------
   function makeName() {
@@ -127,13 +147,13 @@
       manager: managerName || 'Manager',
       season: 1, week: 0, userClub: clubIndex,
       clubs: [], players: {}, freeAgents: [], nextPid: 1,
-      fixtures: [], news: [], history: [], training: 'normal',
+      fixtures: [], calendar: [], cup: null, news: [], history: [], training: 'normal',
       boardWarning: false, gameOver: false, seasonOver: false,
     };
     CLUBS.forEach((c, i) => {
       G.clubs.push({
-        id: i, name: c.name, short: c.short, color: c.color, rep: c.rep,
-        budget: Math.round((c.rep - 50) * 450000 / 100000) * 100000,
+        id: i, name: c.name, short: c.short, color: c.color, rep: c.rep, div: c.div,
+        budget: Math.max(1.5e6, Math.round((c.rep - 50) * 450000 / 100000) * 100000),
         formation: pick(Object.keys(FORMATIONS)), mentality: 'balanced',
         squad: [], lineup: [], table: blankTable(),
       });
@@ -151,16 +171,68 @@
     for (let i = 0; i < 24; i++) {
       addPlayer(genPlayer(pick(['GK', 'DF', 'DF', 'MF', 'MF', 'FW']), ri(55, 70), 19, 33), null);
     }
-    G.fixtures = makeFixtures(G.clubs.length);
-    pushNews(`Welcome, ${G.manager}! The board of ${userClub().name} expects a finish around ${ordinal(expectedPosition())}.`);
+    scheduleSeason();
+    pushNews(`Welcome, ${G.manager}! The board of ${userClub().name} expects a finish around ${ordinal(expectedPosition())} in Division ${userClub().div}.`);
     return G;
   }
   function starterCount(pos) { return { GK: 1, DF: 4, MF: 4, FW: 2 }[pos]; }
   function blankTable() { return { p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0, form: [] }; }
 
-  function makeFixtures(n) {
+  function shuffle(arr) {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+    return a;
+  }
+  function makeCalendar(leagueWeeks) {
+    const cal = [];
+    let md = 0, cr = 0;
+    while (md < leagueWeeks || cr < CUP_ROUNDS.length) {
+      if (cr < CUP_ROUNDS.length && md >= CUP_AFTER[cr]) cal.push({ type: 'cup', round: cr++ });
+      else cal.push({ type: 'league', md: md++ });
+    }
+    return cal;
+  }
+  function scheduleSeason() {
+    const n = G.clubs.filter((c) => c.div === 1).length;
+    G.calendar = makeCalendar((n - 1) * 2);
+    const weekOfMd = {};
+    G.calendar.forEach((c, i) => { if (c.type === 'league') weekOfMd[c.md] = i; });
+    G.fixtures = [];
+    [1, 2].forEach((div) => {
+      const ids = shuffle(G.clubs.filter((c) => c.div === div).map((c) => c.id));
+      makeFixtures(ids).forEach((f) => { f.comp = 'L'; f.div = div; f.week = weekOfMd[f.md]; G.fixtures.push(f); });
+    });
+    const seeds = G.clubs.filter((c) => c.div === 1).sort((a, b) => b.rep - a.rep).slice(0, CUP_BYES);
+    G.cup = { alive: G.clubs.map((c) => c.id), byes: seeds.map((c) => c.id), winner: null };
+  }
+  function cupDraw(week) {
+    const cal = G.calendar[week];
+    if (!cal || cal.type !== 'cup' || fixturesForWeek(week).length) return;
+    const r = cal.round;
+    const pool = shuffle(G.cup.alive.filter((id) => r > 0 || !G.cup.byes.includes(id)));
+    for (let i = 0; i + 1 < pool.length; i += 2) {
+      G.fixtures.push({ comp: 'CUP', round: r, week, home: pool[i], away: pool[i + 1], played: false, hg: 0, ag: 0 });
+    }
+    const uf = userFixture(week);
+    if (uf) pushNews(`🏆 ${CUP_NAME} ${CUP_ROUNDS[r].toLowerCase()} draw: ${club(uf.home).name} v ${club(uf.away).name}.`);
+    else if (r === 0 && G.cup.byes.includes(G.userClub)) pushNews(`🏆 As a seeded club you have a bye through the ${CUP_NAME} first round.`);
+  }
+  function cupResult(cid) {
+    if (G.cup.winner === cid) return 'Winners';
+    const lost = G.fixtures.find((f) => f.comp === 'CUP' && f.played && (f.home === cid || f.away === cid) && f.winner !== cid);
+    if (lost) return lost.round === CUP_ROUNDS.length - 1 ? 'Runners-up' : `Out in ${CUP_ROUNDS[lost.round].toLowerCase()}`;
+    return G.cup.alive.includes(cid) ? 'Still in' : '-';
+  }
+  function weekLabel(w) {
+    const c = G.calendar[w];
+    if (!c) return '';
+    return c.type === 'cup' ? `${CUP_NAME} · ${CUP_ROUNDS[c.round]}` : `Matchday ${c.md + 1}`;
+  }
+
+  function makeFixtures(idList) {
     // circle method; second half of the season mirrors the first with venues swapped
-    const ids = [...Array(n).keys()];
+    const n = idList.length;
+    const ids = [...idList];
     const rounds = [];
     for (let r = 0; r < n - 1; r++) {
       const games = [];
@@ -172,11 +244,11 @@
       ids.splice(1, 0, ids.pop());
     }
     const fx = [];
-    rounds.forEach((g, r) => g.forEach(([h, a]) => fx.push({ week: r, home: h, away: a, played: false, hg: 0, ag: 0 })));
-    rounds.forEach((g, r) => g.forEach(([h, a]) => fx.push({ week: r + n - 1, home: a, away: h, played: false, hg: 0, ag: 0 })));
+    rounds.forEach((g, r) => g.forEach(([h, a]) => fx.push({ md: r, home: h, away: a, played: false, hg: 0, ag: 0 })));
+    rounds.forEach((g, r) => g.forEach(([h, a]) => fx.push({ md: r + n - 1, home: a, away: h, played: false, hg: 0, ag: 0 })));
     return fx;
   }
-  const totalWeeks = () => (G.clubs.length - 1) * 2;
+  const totalWeeks = () => G.calendar.length;
   const fixturesForWeek = (w) => G.fixtures.filter((f) => f.week === w);
   const userFixture = (w = G.week) => fixturesForWeek(w).find((f) => f.home === G.userClub || f.away === G.userClub);
 
@@ -382,8 +454,34 @@
     // AI substitutions (the user's side too when they choose to sim)
     [0, 1].forEach((s) => { if (m.sides[s] !== G.userClub || opts.autoUser) aiSubs(m, s); });
     if (m.min === 45) ev(m, -1, 'info', `⏸ Half-time: ${m.score[0]}-${m.score[1]}`);
-    if (m.min >= 90) { m.done = true; ev(m, -1, 'info', `🏁 Full-time: ${club(m.sides[0]).name} ${m.score[0]}-${m.score[1]} ${club(m.sides[1]).name}`); }
+    if (m.min >= 90) {
+      if (m.fx.comp === 'CUP' && m.score[0] === m.score[1]) shootout(m);
+      m.done = true;
+      ev(m, -1, 'info', `🏁 Full-time: ${club(m.sides[0]).name} ${m.score[0]}-${m.score[1]} ${club(m.sides[1]).name}${m.pens ? ` (${m.pens[0]}-${m.pens[1]} on penalties)` : ''}`);
+    }
     return m;
+  }
+  function shootout(m) {
+    const pens = [0, 0];
+    const takers = m.lineups.map((lu) => [...lu].sort((a, b) => (a.slot === 'GK') - (b.slot === 'GK') || player(b.pid).ovr - player(a.pid).ovr));
+    ev(m, -1, 'info', '🎯 Level after 90 minutes — penalties!');
+    for (let k = 0; k < 40; k++) {
+      for (const s of [0, 1]) {
+        const t = takers[s][k % takers[s].length];
+        const gk = m.lineups[1 - s].find((l) => l.slot === 'GK');
+        const pScore = clamp(0.76 + (player(t.pid).ovr - (gk ? player(gk.pid).ovr : 45)) * 0.004, 0.55, 0.9);
+        const scored = rand() < pScore;
+        if (scored) pens[s]++;
+        ev(m, s, 'pen', `${scored ? '✅' : '❌'} ${pname(t.pid)} ${scored ? 'scores' : 'misses'}. (${pens[0]}-${pens[1]})`);
+        if (k < 5) {
+          // stop once one side can no longer catch up
+          const leftA = 5 - (k + 1), leftB = 5 - (k + (s === 1 ? 1 : 0));
+          if (pens[0] > pens[1] + leftB || pens[1] > pens[0] + leftA) { m.pens = pens; return; }
+        }
+      }
+      if (k >= 4 && pens[0] !== pens[1]) break;
+    }
+    m.pens = pens;
   }
   function simMatch(fx, opts = {}) {
     const m = createMatch(fx);
@@ -399,14 +497,30 @@
     const { fx } = m;
     fx.played = true; fx.hg = m.score[0]; fx.ag = m.score[1];
     fx.scorers = m.scorers.map((s) => ({ side: s.side, name: pname(s.pid), min: s.min }));
-    const [h, a] = [club(fx.home).table, club(fx.away).table];
-    h.p++; a.p++; h.gf += fx.hg; h.ga += fx.ag; a.gf += fx.ag; a.ga += fx.hg;
-    const res = fx.hg > fx.ag ? ['W', 'L'] : fx.hg < fx.ag ? ['L', 'W'] : ['D', 'D'];
-    [h, a].forEach((t, i) => {
-      const r = res[i];
-      if (r === 'W') { t.w++; t.pts += 3; } else if (r === 'D') { t.d++; t.pts += 1; } else t.l++;
-      t.form = [...t.form, r].slice(-5);
-    });
+    let res = fx.hg > fx.ag ? ['W', 'L'] : fx.hg < fx.ag ? ['L', 'W'] : ['D', 'D'];
+    if (fx.comp === 'CUP') {
+      fx.pens = m.pens || null;
+      const ws = fx.hg !== fx.ag ? (fx.hg > fx.ag ? 0 : 1) : (m.pens[0] > m.pens[1] ? 0 : 1);
+      res = ws === 0 ? ['W', 'L'] : ['L', 'W'];
+      fx.winner = m.sides[ws];
+      const loser = m.sides[1 - ws];
+      G.cup.alive = G.cup.alive.filter((id) => id !== loser);
+      club(fx.winner).budget += CUP_PRIZE[fx.round];
+      if (fx.round === CUP_ROUNDS.length - 1) {
+        G.cup.winner = fx.winner;
+        pushNews(`🏆 ${club(fx.winner).name} win the ${CUP_NAME}, beating ${club(loser).name}!`);
+      } else if (fx.winner === G.userClub) {
+        pushNews(`🏆 Through to the ${CUP_NAME} ${CUP_ROUNDS[fx.round + 1].toLowerCase()} (+${money(CUP_PRIZE[fx.round])}).`);
+      } else if (loser === G.userClub) pushNews(`💔 Knocked out of the ${CUP_NAME} in the ${CUP_ROUNDS[fx.round].toLowerCase()}.`);
+    } else {
+      const [h, a] = [club(fx.home).table, club(fx.away).table];
+      h.p++; a.p++; h.gf += fx.hg; h.ga += fx.ag; a.gf += fx.ag; a.ga += fx.hg;
+      [h, a].forEach((t, i) => {
+        const r = res[i];
+        if (r === 'W') { t.w++; t.pts += 3; } else if (r === 'D') { t.d++; t.pts += 1; } else t.l++;
+        t.form = [...t.form, r].slice(-5);
+      });
+    }
     m.sides.forEach((cid, s) => {
       const r = res[s];
       squadOf(cid).forEach((p) => {
@@ -479,6 +593,7 @@
     validateLineup(G.userClub);
     G.week++;
     if (G.week >= totalWeeks()) G.seasonOver = true;
+    else cupDraw(G.week);
     checkBoard();
   }
   function aiMentality(c) {
@@ -503,14 +618,15 @@
   }
 
   // ---------- table ----------
-  function standings() {
-    return [...G.clubs].sort((a, b) => b.table.pts - a.table.pts
+  function standings(div = userClub().div) {
+    return G.clubs.filter((c) => c.div === div).sort((a, b) => b.table.pts - a.table.pts
       || (b.table.gf - b.table.ga) - (a.table.gf - a.table.ga)
       || b.table.gf - a.table.gf || a.name.localeCompare(b.name));
   }
-  function position(cid) { return standings().findIndex((c) => c.id === cid) + 1; }
-  function expectedPosition() {
-    return [...G.clubs].sort((a, b) => b.rep - a.rep).findIndex((c) => c.id === G.userClub) + 1;
+  function position(cid) { return standings(club(cid).div).findIndex((c) => c.id === cid) + 1; }
+  function expectedPosition(cid = G.userClub) {
+    const div = club(cid).div;
+    return G.clubs.filter((c) => c.div === div).sort((a, b) => b.rep - a.rep).findIndex((c) => c.id === cid) + 1;
   }
 
   // ---------- transfers ----------
@@ -615,32 +731,58 @@
 
   // ---------- season end ----------
   function endSeason() {
-    const table = standings();
+    const u = userClub();
+    const div = u.div;
     const pos = position(G.userClub);
     const exp = expectedPosition();
-    const champ = table[0];
-    const topScorer = Object.values(G.players).filter((p) => p.club !== null).sort((a, b) => b.goals - a.goals)[0];
+    const t1 = standings(1), t2 = standings(2);
+    const relegated = t1.slice(-PROMOTED), promoted = t2.slice(0, PROMOTED);
+    const prizeFor = (d, i) => (d === 1 ? PRIZES[i] : Math.round(PRIZES[i] * DIV2_PRIZE_SHARE));
+    const topScorer = Object.values(G.players).filter((p) => p.club !== null && club(p.club).div === div)
+      .sort((a, b) => b.goals - a.goals)[0];
     const summary = {
-      season: G.season, champion: champ.name, position: pos, expected: exp,
-      points: userClub().table.pts, prize: PRIZES[pos - 1],
+      season: G.season, division: div, champion: t1[0].name, d2Champion: t2[0].name,
+      position: pos, expected: exp, points: u.table.pts, prize: prizeFor(div, pos - 1),
+      promoted: promoted.map((c) => c.name), relegated: relegated.map((c) => c.name),
+      cupWinner: G.cup.winner !== null ? club(G.cup.winner).name : '-', cup: cupResult(G.userClub),
       topScorer: topScorer ? `${topScorer.name} (${club(topScorer.club).short}) — ${topScorer.goals}` : '-',
-      retired: [], youth: [], verdict: '',
+      retired: [], youth: [], verdict: '', move: null,
     };
-    table.forEach((c, i) => { c.budget += PRIZES[i]; });
-    // reputation drift
-    table.forEach((c, i) => {
-      const e = [...G.clubs].sort((a, b) => b.rep - a.rep).findIndex((x) => x.id === c.id);
-      c.rep = clamp(Math.round(c.rep + (e - i) * 0.6), 50, 92);
+    [[1, t1], [2, t2]].forEach(([d, table]) => {
+      const byRep = [...table].sort((a, b) => b.rep - a.rep);
+      table.forEach((c, i) => {
+        c.budget += prizeFor(d, i);
+        c.rep = clamp(Math.round(c.rep + (byRep.indexOf(c) - i) * 0.6), 40, 92); // reputation drift
+      });
     });
-    if (pos <= exp - 2) summary.verdict = 'The board is delighted — you smashed expectations!';
-    else if (pos <= exp) summary.verdict = 'The board is pleased with the season.';
+    // promotion & relegation
+    relegated.forEach((c) => { c.div = 2; c.rep = Math.max(40, c.rep - 3); });
+    promoted.forEach((c) => { c.div = 1; c.rep = Math.min(92, c.rep + 3); });
+    const wentUp = promoted.includes(u), wentDown = relegated.includes(u);
+    if (wentUp) summary.move = 'up';
+    if (wentDown) summary.move = 'down';
+
+    let sacked = false;
+    if (wentUp) summary.verdict = pos === 1 ? 'Champions and promoted! The board is ecstatic.' : 'Promoted! The board is thrilled.';
+    else if (pos <= exp - 2) summary.verdict = 'The board is delighted — you smashed expectations!';
+    else if (pos <= exp && !wentDown) summary.verdict = 'The board is pleased with the season.';
+    else if (wentDown && exp <= t1.length - PROMOTED - 3) sacked = true;
+    else if (wentDown) summary.verdict = 'Relegated. The board expected a struggle and keeps faith in you to bounce back.';
     else if (pos <= exp + 3) summary.verdict = 'The board expected more, but your job is safe.';
-    else {
+    else sacked = true;
+    if (sacked && G.cup.winner === G.userClub) {
+      summary.verdict = `A poor league season, but winning the ${CUP_NAME} has saved your job.`;
+      sacked = false;
+    }
+    if (sacked) {
       summary.verdict = 'The board is deeply disappointed. You have been sacked.';
       G.gameOver = true;
-      G.gameOverReason = `Finished ${ordinal(pos)} when the board expected ${ordinal(exp)}.`;
+      G.gameOverReason = wentDown
+        ? `Relegated from Division 1 when the board expected ${ordinal(exp)}.`
+        : `Finished ${ordinal(pos)} in Division ${div} when the board expected ${ordinal(exp)}.`;
     }
-    G.history.push({ season: G.season, position: pos, points: summary.points, champion: champ.name });
+    G.history.push({ season: G.season, division: div, position: pos, points: summary.points,
+      champion: div === 1 ? t1[0].name : t2[0].name, cup: summary.cup, move: summary.move });
 
     // ageing, development, retirement
     Object.values(G.players).forEach((p) => {
@@ -692,9 +834,9 @@
       G.season++;
       G.week = 0;
       G.seasonOver = false;
-      G.fixtures = makeFixtures(G.clubs.length);
+      scheduleSeason();
       G.news = [];
-      pushNews(`📅 Season ${G.season} begins. The board expects a finish around ${ordinal(expectedPosition())}.`);
+      pushNews(`📅 Season ${G.season} begins in Division ${userClub().div}. The board expects a finish around ${ordinal(expectedPosition())}.`);
     }
     return summary;
   }
@@ -735,5 +877,6 @@
     endWeek, endSeason, standings, position, expectedPosition,
     playerValue, askingPrice, signingWage, canBuy, buy, getOffer, sell, release, releaseCost,
     money, ordinal, pushNews, gateIncome, weeklyIncome, wageBill,
+    CUP_NAME, CUP_ROUNDS, CUP_PRIZE, PROMOTED, cupResult, weekLabel,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

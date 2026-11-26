@@ -12,7 +12,7 @@
     squadSort: 'pos',
     tacticSel: null, // index into lineup, or 'b:<pid>' for a bench player
     marketPos: 'ALL', marketMax: 0, marketQuery: '',
-    leagueView: 'table', resultsWeek: null,
+    leagueView: 'table', resultsWeek: null, leagueDiv: null,
     match: null, matchTimer: null, matchSpeed: 1, matchSel: null, matchPaused: false,
   };
 
@@ -23,7 +23,7 @@
   const crest = (c, cls = '') => `<div class="crest ${cls}" style="background:${c.color}">${esc(c.short)}</div>`;
   const posTag = (p) => `<span class="pos ${p}">${p}</span>`;
   const bar = (v, color) => `<div class="bar"><i style="width:${Math.max(0, Math.min(100, v))}%;background:${color || (v > 75 ? 'var(--accent)' : v > 50 ? 'var(--warn)' : 'var(--bad)')}"></i></div>`;
-  const stars = (rep) => '★'.repeat(Math.max(1, Math.round((rep - 55) / 6))) ;
+  const stars = (rep) => '★'.repeat(Math.max(1, Math.round((rep - 45) / 8)));
   const formHtml = (f) => `<span class="form">${f.map((r) => `<i class="${r}">${r}</i>`).join('')}</span>`;
 
   function save() {
@@ -66,13 +66,14 @@
       <div class="card"><label class="muted small">Manager name</label><br>
         <input id="mname" maxlength="24" placeholder="Your name" style="width:100%;margin-top:6px" value="Manager"></div>
       <h2>Choose your club</h2>
-      <div class="list">${clubs.map((c, i) => `
+      ${[1, 2].map((div) => `<h2>Division ${div}</h2><div class="list">${clubs.map((c, i) => (c.div !== div ? '' : `
         <div class="item tap" data-a="pick-club" data-i="${i}">
           <div class="crest" style="background:${c.color}">${c.short}</div>
           <div class="grow"><div class="name">${c.name}</div><div class="stars">${stars(c.rep)}</div></div>
-          <div class="muted small">${i < 3 ? 'Title contender' : i < 7 ? 'Mid-table' : 'Underdog'}</div>
-        </div>`).join('')}
-      </div></div>`;
+          <div class="muted small">${div === 1 ? (i < 3 ? 'Title contender' : i < 8 ? 'Mid-table' : 'Relegation fight')
+            : (i < 15 ? 'Promotion hopeful' : 'Long-term project')}</div>
+        </div>`)).join('')}</div>`).join('')}
+      </div>`;
   }
 
   // ---------- main shell ----------
@@ -86,7 +87,7 @@
     const body = { home: viewHome, squad: viewSquad, tactics: viewTactics, league: viewLeague, transfers: viewTransfers, club: viewClub }[ui.tab]();
     app.innerHTML = `
       <div class="top">${crest(c)}
-        <div class="title"><b>${esc(c.name)}</b><small>Season ${G().season} · Week ${Math.min(G().week + 1, E.totalWeeks())}/${E.totalWeeks()} · ${E.ordinal(E.position(c.id))}</small></div>
+        <div class="title"><b>${esc(c.name)}</b><small>Season ${G().season} · Week ${Math.min(G().week + 1, E.totalWeeks())}/${E.totalWeeks()} · Div ${c.div} · ${E.ordinal(E.position(c.id))}</small></div>
         <div class="money">${M(c.budget)}<small>budget</small></div>
       </div>
       <main>${body}</main>
@@ -104,34 +105,47 @@
     } else if (g.seasonOver) {
       const champ = E.standings()[0];
       top = `<div class="card"><h2>🏁 Season ${g.season} complete</h2>
-        <p>${esc(champ.name)} are champions. You finished <b>${E.ordinal(E.position(g.userClub))}</b> (board expected ${E.ordinal(E.expectedPosition())}).</p>
+        <p>${esc(champ.name)} are Division ${E.userClub().div} champions. You finished <b>${E.ordinal(E.position(g.userClub))}</b> (board expected ${E.ordinal(E.expectedPosition())}).</p>
         <button class="btn primary block" data-a="end-season">See season review</button></div>`;
+    } else if (!E.userFixture()) {
+      const cupNote = g.cup.alive.includes(g.userClub) ? 'You have a bye this round.' : `You're out of the ${E.CUP_NAME}.`;
+      top = `<div class="card"><div class="small muted">${esc(E.weekLabel(g.week))}</div>
+        <h2>No match this week</h2><p class="muted">${cupNote} The squad gets a week to rest.</p>
+        <button class="btn primary block" data-a="skip-week">⏩ Continue</button></div>`;
     } else {
       const fx = E.userFixture();
       const h = E.club(fx.home), a = E.club(fx.away);
+      const cup = fx.comp === 'CUP';
       const lineup = E.validateLineup(g.userClub);
       top = `<div class="card">
-        <div class="row between small muted"><span>Matchday ${g.week + 1}</span><span>${fx.home === g.userClub ? 'Home' : 'Away'}</span></div>
+        <div class="row between small muted"><span>${cup ? '🏆 ' : `Division ${E.userClub().div} · `}${esc(E.weekLabel(g.week))}</span><span>${fx.home === g.userClub ? 'Home' : 'Away'}</span></div>
         <div class="fixture" style="margin:12px 0">
-          <div class="side">${crest(h)}<b>${esc(h.name)}</b><span class="strength">Str ${E.clubStrength(h.id)} · ${E.ordinal(E.position(h.id))}</span>${formHtml(h.table.form)}</div>
+          <div class="side">${crest(h)}<b>${esc(h.name)}</b><span class="strength">Str ${E.clubStrength(h.id)} · ${clubPos(h)}</span>${formHtml(h.table.form)}</div>
           <div class="vs">vs</div>
-          <div class="side">${crest(a)}<b>${esc(a.name)}</b><span class="strength">Str ${E.clubStrength(a.id)} · ${E.ordinal(E.position(a.id))}</span>${formHtml(a.table.form)}</div>
+          <div class="side">${crest(a)}<b>${esc(a.name)}</b><span class="strength">Str ${E.clubStrength(a.id)} · ${clubPos(a)}</span>${formHtml(a.table.form)}</div>
         </div>
+        ${cup ? `<p class="small" style="text-align:center;color:var(--accent2)">Knockout: a draw goes to penalties. Winning is worth ${M(E.CUP_PRIZE[fx.round])}.</p>` : ''}
         <p class="small muted" style="text-align:center">${E.userClub().formation} · ${E.userClub().mentality} · ${lineup.length}/11 picked</p>
         <div class="btns"><button class="btn primary" data-a="play-live">▶ Play match</button><button class="btn" data-a="play-quick">⏩ Quick sim</button></div>
       </div>`;
     }
-    const last = g.week > 0 && !g.gameOver ? E.fixturesForWeek(g.week - 1) : [];
-    const lastHtml = last.length ? `<h2>Last matchday</h2><div class="list">${last.map(fxRow).join('')}</div>` : '';
+    const last = g.week > 0 && !g.gameOver ? relevantFixtures(g.week - 1) : [];
+    const lastHtml = last.length ? `<h2>Last week · ${esc(E.weekLabel(g.week - 1))}</h2><div class="list">${last.map(fxRow).join('')}</div>` : '';
     const news = g.news.slice(0, 15).map((n) => `<div class="news"><small>S${n.season} W${n.week + 1}</small>${esc(n.text)}</div>`).join('');
     return top + lastHtml + `<h2>Inbox</h2><div class="list">${news || '<div class="news muted">No news yet.</div>'}</div>`;
+  }
+  const clubPos = (c) => `${E.ordinal(E.position(c.id))} in Div ${c.div}`;
+  // the fixtures a user cares about in a week: their division's games, or the cup ties
+  function relevantFixtures(w, div = E.userClub().div) {
+    const fx = E.fixturesForWeek(w);
+    return fx.filter((f) => f.comp === 'CUP' || f.div === div);
   }
   function fxRow(f) {
     const h = E.club(f.home), a = E.club(f.away), me = G().userClub;
     const bold = (c) => (c.id === me ? 'font-weight:800;color:var(--accent)' : '');
     return `<div class="item small">
       <div class="grow" style="text-align:right;${bold(h)}">${esc(h.name)}</div>
-      <b style="width:52px;text-align:center">${f.played ? `${f.hg} - ${f.ag}` : 'v'}</b>
+      <b style="width:${f.pens ? 84 : 52}px;text-align:center">${f.played ? `${f.hg} - ${f.ag}${f.pens ? ` <span class="small muted">(${f.pens[0]}-${f.pens[1]}p)</span>` : ''}` : 'v'}</b>
       <div class="grow" style="${bold(a)}">${esc(a.name)}</div></div>`;
   }
 
@@ -270,33 +284,61 @@
   // ---------- league ----------
   function viewLeague() {
     const g = G();
-    const toggle = `<div class="btns" style="margin-bottom:12px">
-      <button class="btn ${ui.leagueView === 'table' ? 'on' : ''}" data-a="league-view" data-v="table">Table</button>
-      <button class="btn ${ui.leagueView === 'fixtures' ? 'on' : ''}" data-a="league-view" data-v="fixtures">Fixtures</button>
-      <button class="btn ${ui.leagueView === 'stats' ? 'on' : ''}" data-a="league-view" data-v="stats">Top scorers</button></div>`;
+    const div = ui.leagueDiv || E.userClub().div;
+    const views = [['table', 'Table'], ['fixtures', 'Fixtures'], ['cup', 'Cup'], ['stats', 'Scorers']];
+    const toggle = `<div class="btns" style="margin-bottom:10px">${views.map(([k, l]) =>
+      `<button class="btn ${ui.leagueView === k ? 'on' : ''}" data-a="league-view" data-v="${k}">${l}</button>`).join('')}</div>`;
+    const divChips = `<div class="chips">${[1, 2].map((d) => `<button class="btn ${div === d ? 'on' : ''}" data-a="league-div" data-d="${d}">Division ${d}</button>`).join('')}</div>`;
     if (ui.leagueView === 'fixtures') {
       const w = ui.resultsWeek === null ? Math.min(g.week, E.totalWeeks() - 1) : ui.resultsWeek;
-      return toggle + `<div class="row between" style="margin-bottom:8px">
+      const fx = relevantFixtures(w, div);
+      const cupWeek = g.calendar[w].type === 'cup';
+      return toggle + (cupWeek ? '' : divChips) + `<div class="row between" style="margin-bottom:8px">
           <button class="btn" data-a="week" data-d="-1" ${w <= 0 ? 'disabled' : ''}>◀</button>
-          <b>Matchday ${w + 1}</b>
+          <b>${esc(E.weekLabel(w))}</b>
           <button class="btn" data-a="week" data-d="1" ${w >= E.totalWeeks() - 1 ? 'disabled' : ''}>▶</button></div>
-        <div class="list">${E.fixturesForWeek(w).map(fxRow).join('')}</div>`;
+        <div class="list">${fx.map(fxRow).join('') || `<div class="news muted">${cupWeek ? 'The draw for this round has not been made yet.' : 'No fixtures.'}</div>`}</div>`;
     }
+    if (ui.leagueView === 'cup') return toggle + viewCup();
     if (ui.leagueView === 'stats') {
-      const ps = Object.values(g.players).filter((p) => p.club !== null && (p.goals || p.assists))
+      const ps = Object.values(g.players).filter((p) => p.club !== null && E.club(p.club).div === div && (p.goals || p.assists))
         .sort((a, b) => b.goals - a.goals || b.assists - a.assists).slice(0, 25);
-      return toggle + `<div class="list"><table><tr><th>#</th><th class="l">Player</th><th>Club</th><th>⚽</th><th>🅰</th><th>Apps</th></tr>
+      return toggle + divChips + `<div class="list"><table><tr><th>#</th><th class="l">Player</th><th>Club</th><th>⚽</th><th>🅰</th><th>Apps</th></tr>
         ${ps.map((p, i) => `<tr class="${p.club === g.userClub ? 'me' : ''}"><td>${i + 1}</td><td class="l">${esc(p.name)}</td><td>${E.club(p.club).short}</td><td>${p.goals}</td><td>${p.assists}</td><td>${p.apps}</td></tr>`).join('')}
-        </table>${ps.length ? '' : '<div class="news muted">No goals yet.</div>'}</div>`;
+        </table>${ps.length ? '' : '<div class="news muted">No goals yet.</div>'}</div><p class="small muted">Goals include cup matches.</p>`;
     }
+    const table = E.standings(div);
+    const n = table.length, k = E.PROMOTED;
+    const zone = (i) => (div === 1 && i >= n - k ? 'zone-down' : div === 2 && i < k ? 'zone-up' : '');
+    const mine = E.userClub().div === div;
     const exp = E.expectedPosition();
-    return toggle + `<div class="list"><table>
+    const note = !mine ? '' : `<p class="small muted">Board expectation: finish ${E.ordinal(exp)} or better.
+      ${div === 1 ? `The bottom ${k} are relegated to Division 2.` : `The top ${k} are promoted to Division 1.`}
+      ${[exp + 5 <= n ? `finishing ${E.ordinal(exp + 5)} or lower` : '', div === 1 && exp <= n - k - 3 ? 'being relegated' : '']
+        .filter(Boolean).map((x, i, a) => (i ? ' or ' : '') + x).join('').replace(/^./, (c) => c.toUpperCase()).replace(/(.+)/, '$1 gets you sacked.')}
+      Winning the ${E.CUP_NAME} saves your job.</p>`;
+    return toggle + divChips + `<div class="list"><table>
       <tr><th>#</th><th class="l">Club</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th><th>Form</th></tr>
-      ${E.standings().map((c, i) => `<tr class="${c.id === g.userClub ? 'me' : ''}">
+      ${table.map((c, i) => `<tr class="${c.id === g.userClub ? 'me' : ''} ${zone(i)}">
         <td>${i + 1}</td><td class="l"><span class="dot" style="background:${c.color}"></span>${esc(c.short)}</td>
         <td>${c.table.p}</td><td>${c.table.w}</td><td>${c.table.d}</td><td>${c.table.l}</td>
         <td>${c.table.gf - c.table.ga > 0 ? '+' : ''}${c.table.gf - c.table.ga}</td><td><b>${c.table.pts}</b></td><td>${formHtml(c.table.form.slice(-3))}</td></tr>`).join('')}
-      </table></div><p class="small muted">Board expectation: finish ${E.ordinal(exp)} or better. Finishing ${E.ordinal(Math.min(12, exp + 4))} or lower gets you sacked.</p>`;
+      </table></div>
+      <p class="small">${div === 2 ? '<span class="key up"></span>Promotion' : '<span class="key down"></span>Relegation'} zone</p>${note}`;
+  }
+  function viewCup() {
+    const g = G();
+    const status = g.cup.winner !== null ? `🏆 ${esc(E.club(g.cup.winner).name)} won the ${E.CUP_NAME}.`
+      : g.cup.alive.includes(g.userClub) ? `You're still in the ${E.CUP_NAME}.` : `You're out: ${esc(E.cupResult(g.userClub).toLowerCase())}.`;
+    const rounds = g.calendar.map((c, w) => ({ ...c, w })).filter((c) => c.type === 'cup');
+    return `<div class="card"><b>${E.CUP_NAME}</b><p class="small muted" style="margin:6px 0">
+        A knockout for all ${g.clubs.length} clubs. The ${g.cup.byes.length} top-rated Division 1 sides skip the first round.
+        A draw after 90 minutes goes to penalties.</p><p style="margin:0">${status}</p></div>
+      ${rounds.map((r) => {
+        const fx = E.fixturesForWeek(r.w);
+        return `<h2>${E.CUP_ROUNDS[r.round]} <span class="small muted">· week ${r.w + 1} · win ${M(E.CUP_PRIZE[r.round])}</span></h2>
+          <div class="list">${fx.map(fxRow).join('') || '<div class="news muted">Not drawn yet.</div>'}</div>`;
+      }).join('')}`;
   }
 
   // ---------- transfers ----------
@@ -335,7 +377,8 @@
       <div class="btns">${Object.keys(E.INTENSITY).map((k) => `<button class="btn ${g.training === k ? 'on' : ''}" data-a="training" data-k="${k}">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div>
       <p class="small muted">Harder training develops young players faster, but players recover less fitness and get injured more.</p>
       <h2>History</h2>
-      <div class="list">${g.history.length ? g.history.map((h) => `<div class="item"><div class="grow">Season ${h.season}</div><b>${E.ordinal(h.position)}</b><span class="muted small">${h.points} pts · 🏆 ${esc(h.champion)}</span></div>`).join('') : '<div class="news muted">Your first season is under way.</div>'}</div>
+      <div class="list">${g.history.length ? g.history.map((h) => `<div class="item"><div class="grow">Season ${h.season}<div class="small muted">Cup: ${esc(h.cup)}</div></div>
+        <b>${E.ordinal(h.position)} · Div ${h.division}${h.move === 'up' ? ' ⬆️' : h.move === 'down' ? ' ⬇️' : ''}</b><span class="muted small">${h.points} pts</span></div>`).join('') : '<div class="news muted">Your first season is under way.</div>'}</div>
       <h2>Game</h2>
       <div class="btns"><button class="btn" data-a="save">💾 Save</button><button class="btn danger" data-a="new-career">New career</button></div>
       <p class="small muted">Progress also saves automatically after every matchday (in this browser).</p>`;
@@ -430,10 +473,18 @@
     openModal(`<h2 style="margin-top:0">${res}</h2>
       <div class="fixture"><div class="side">${crest(E.club(m.sides[0]))}</div><div class="score" style="font-size:32px;font-weight:900">${m.score[0]} - ${m.score[1]}</div><div class="side">${crest(E.club(m.sides[1]))}</div></div>
       <p class="small muted" style="text-align:center">${scorers.map(esc).join(' · ') || 'No goals'}</p>
+      ${m.pens ? `<p style="text-align:center;margin-top:0"><b>${m.pens[0]} - ${m.pens[1]} on penalties</b></p>` : ''}
       <b class="small muted">Other results</b>
-      <div class="list">${others.map(fxRow).join('')}</div>
+      <div class="list">${others.filter((f) => f.comp === m.fx.comp && f.div === m.fx.div).map(fxRow).join('')}</div>
       <button class="btn primary block" data-a="next-week">Continue</button>`);
     ui.match = null;
+  }
+  function skipWeek() {
+    const others = E.playOtherMatches(null);
+    const shown = others.filter((f) => f.comp === 'CUP' || f.div === E.userClub().div);
+    openModal(`<h2 style="margin-top:0">${esc(E.weekLabel(G().week))}</h2>
+      <div class="list">${shown.map(fxRow).join('') || '<div class="news muted">No matches.</div>'}</div>
+      <button class="btn primary block" data-a="next-week">Continue</button>`);
   }
   function nextWeek() {
     closeModal();
@@ -450,13 +501,19 @@
     save();
     openModal(`<h2 style="margin-top:0">Season ${s.season} review</h2>
       <div class="kv">
-        <span>Champions</span><span>🏆 ${esc(s.champion)}</span>
-        <span>Your finish</span><span>${E.ordinal(s.position)} (${s.points} pts)</span>
+        <span>Division 1 champions</span><span>🏆 ${esc(s.champion)}</span>
+        <span>Division 2 champions</span><span>${esc(s.d2Champion)}</span>
+        <span>${E.CUP_NAME}</span><span>🏆 ${esc(s.cupWinner)}</span>
+        <span>Your finish</span><span>${E.ordinal(s.position)} in Div ${s.division} (${s.points} pts)</span>
+        <span>Your cup run</span><span>${esc(s.cup)}</span>
         <span>Board target</span><span>${E.ordinal(s.expected)}</span>
         <span>Prize money</span><span>${M(s.prize)}</span>
         <span>Golden boot</span><span>${esc(s.topScorer)}</span>
       </div>
+      ${s.move === 'up' ? '<p style="color:var(--accent);font-weight:800">⬆️ PROMOTED TO DIVISION 1!</p>' : ''}
+      ${s.move === 'down' ? '<p style="color:var(--bad);font-weight:800">⬇️ Relegated to Division 2.</p>' : ''}
       <p><b>${esc(s.verdict)}</b></p>
+      <p class="small muted">⬆️ Up: ${s.promoted.map(esc).join(', ')} · ⬇️ Down: ${s.relegated.map(esc).join(', ')}</p>
       ${s.retired.length ? `<p class="small"><b>Retired:</b> ${s.retired.map(esc).join(', ')}</p>` : ''}
       ${s.youth.length ? `<p class="small"><b>Youth intake:</b> ${s.youth.map(esc).join(', ')}</p>` : ''}
       <button class="btn primary block" data-a="close-render">${G().gameOver ? 'OK' : 'Start next season'}</button>`);
@@ -469,7 +526,7 @@
     const a = t.dataset.a, d = t.dataset;
     switch (a) {
       case 'continue':
-        try { E.load(localStorage.getItem(SAVE_KEY)); render(); } catch (err) { toast('Save could not be loaded.'); renderStart(true); }
+        try { E.load(localStorage.getItem(SAVE_KEY)); ui.leagueDiv = null; render(); } catch (err) { toast('Save could not be loaded.'); renderStart(true); }
         break;
       case 'new-career': {
         const reset = () => { try { localStorage.removeItem(SAVE_KEY); } catch (err) { /* ignore */ } closeModal(); renderStart(true); };
@@ -482,7 +539,7 @@
       case 'pick-club': {
         const name = (document.getElementById('mname').value || 'Manager').trim().slice(0, 24) || 'Manager';
         E.newGame(+d.i, name);
-        ui.tab = 'home'; save(); render(); break;
+        ui.tab = 'home'; ui.leagueDiv = null; save(); render(); break;
       }
       case 'tab': ui.tab = d.t; ui.tacticSel = null; render(); window.scrollTo(0, 0); break;
       case 'play-live': startMatch(true); break;
@@ -491,7 +548,7 @@
       case 'squad-sort': ui.squadSort = d.k; render(); break;
       case 'player': playerModal(+d.id); break;
       case 'close': closeModal(); if (ui.match) { ui.matchSel = null; renderMatch(); } break;
-      case 'close-render': closeModal(); ui.tab = 'home'; render(); break;
+      case 'close-render': closeModal(); ui.tab = 'home'; ui.leagueDiv = null; render(); break;
       case 'formation': {
         const c = E.userClub(); c.formation = d.f; c.lineup = E.autoLineup(c.id); ui.tacticSel = null; render(); break;
       }
@@ -500,6 +557,8 @@
       case 'xi': tacticTap('xi', +d.i); break;
       case 'bench': tacticTap('bench', +d.id); break;
       case 'league-view': ui.leagueView = d.v; render(); break;
+      case 'league-div': ui.leagueDiv = +d.d; render(); break;
+      case 'skip-week': skipWeek(); break;
       case 'week': {
         const cur = ui.resultsWeek === null ? Math.min(G().week, E.totalWeeks() - 1) : ui.resultsWeek;
         ui.resultsWeek = Math.max(0, Math.min(E.totalWeeks() - 1, cur + +d.d)); render(); break;

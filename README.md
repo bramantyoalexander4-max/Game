@@ -15,11 +15,13 @@ Open `index.html` in a browser, or serve the folder (for example `python3 -m htt
 - **Squad:** player ratings, potential, age, fitness, morale, injuries, and goals and assists.
 - **Transfers:** buy from rival clubs or sign free agents, take offers for your players, or release them. Players turn down clubs below their level.
 - **Finances:** wages, TV and commercial income, gate receipts and prize money. Going more than £5M into debt gets you fired.
-- **Seasons:** 22-matchday double round-robin. Players age, develop and retire, and youth players join each year. Club reputations shift with results, and the board judges you against its expectation.
+- **Two divisions:** 24 clubs in two divisions of 12. Each season the bottom 2 of Division 1 swap places with the top 2 of Division 2.
+- **Shield Cup:** a 5-round knockout for all 24 clubs, played between league matchdays. The 8 top-rated Division 1 clubs get a first-round bye, draws go to penalties, and every round won pays prize money. Winning it saves your job after a bad league season.
+- **Seasons:** 22 league matchdays (a double round-robin) plus the cup rounds. Players age, develop and retire, and youth players join each year. Club reputations shift with results, and the board judges you against its expectation.
 - **Training intensity:** harder training gives faster development but more injuries and slower recovery.
 
 ## Code
 
 - `js/engine.js`: the game rules and simulation. It doesn't touch the DOM and runs under Node.
 - `js/ui.js`: rendering and input.
-- `tests/sim.test.js`: a headless smoke test that plays 5 full seasons. Run it with `node tests/sim.test.js`.
+- `tests/sim.test.js`: a headless smoke test that plays 5 full seasons and checks the table, the cup and promotion/relegation. Run it with `node tests/sim.test.js [clubIndex] [seed]`.
