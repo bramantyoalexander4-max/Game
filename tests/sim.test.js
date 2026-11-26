@@ -1,7 +1,7 @@
 // Headless smoke test: plays several full seasons and checks invariants.
 // Run with: node tests/sim.test.js
 const assert = require('assert');
-['england', 'spain', 'italy', 'france', 'germany', 'europe'].forEach((f) => require(`../data/${f}.js`));
+['england', 'spain', 'italy', 'france', 'germany', 'netherlands', 'portugal', 'europe'].forEach((f) => require(`../data/${f}.js`));
 require('../js/engine.js');
 const E = globalThis.Engine;
 

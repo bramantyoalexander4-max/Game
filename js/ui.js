@@ -134,6 +134,11 @@
       </div>
       <main>${body}</main>
       <nav class="tabs"><div class="inner">${TABS.map(([k, i, l]) => `<button data-a="tab" data-t="${k}" class="${ui.tab === k ? 'on' : ''}"><span>${i}</span>${l}</button>`).join('')}</div></nav>`;
+    // keep the selected chip of each scrolling row in view
+    app.querySelectorAll('.chips').forEach((row) => {
+      const on = row.querySelector('.btn.on');
+      if (on) row.scrollLeft = on.offsetLeft - row.offsetLeft - (row.clientWidth - on.offsetWidth) / 2;
+    });
   }
 
   // ---------- home ----------

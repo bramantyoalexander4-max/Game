@@ -121,7 +121,7 @@
   function datasets() {
     const C = ROOT.TM_COUNTRIES || {};
     const worlds = [FICTIONAL];
-    const keys = ['england', 'spain', 'italy', 'france', 'germany'].filter((k) => C[k]);
+    const keys = ['england', 'spain', 'italy', 'france', 'germany', 'netherlands', 'portugal'].filter((k) => C[k]);
     if (keys.length >= 2 && ROOT.TM_CONTINENTAL) {
       worlds.push(buildWorld('europe', 'Real football — Europe 2025/26', 'Europe 2025/26',
         `${keys.map((k) => C[k].leagues.map((l) => l.name).join(' & ')).join(', ')} and the Champions League. Real clubs and players as of the start of the 2025/26 season; squads may be out of date and ratings are estimates.`,
@@ -288,10 +288,12 @@
       const src = ds.clubs[c.id];
       if (src.players) {
         src.players.forEach((str) => addPlayer(realPlayer(str), c.id));
-        // fill gaps in partially known squads with generated players
+        // fill gaps in partially known squads with generated players: clearly below a known first team,
+        // but at a normal level where we know too few players to field one
+        const fillBase = src.players.length >= 11 ? c.rep - 12 : c.rep - 5;
         for (const pos of Object.keys(SQUAD_TEMPLATE)) {
           while (squadOf(c.id).filter((p) => p.pos === pos).length < SQUAD_TEMPLATE[pos]) {
-            addPlayer(genPlayer(pos, c.rep - 12, 21, 31), c.id); // squad filler, clearly below the real first team
+            addPlayer(genPlayer(pos, fillBase, 21, 31), c.id);
           }
         }
       } else {

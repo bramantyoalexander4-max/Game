@@ -217,7 +217,7 @@
       { name: 'Norwich City', short: 'NOR', color: '#00A650', rep: 64, league: 'ENG2', players: [
         'Vladan Kovačević|GK|27|70', 'Shane Duffy|DF|33|67', 'Jack Stacey|DF|29|67', 'Kellen Fisher|DF|21|66|75',
         'Kenny McLean|MF|33|68', 'Anis Ben Slimane|MF|24|69', 'Emiliano Marcondes|MF|30|67', 'Ante Crnac|FW|21|70|77',
-        'Josh Sargent|FW|25|73', 'Borja Sainz|FW|24|72', 'Oscar Schwartau|FW|18|66|78'] },
+        'Josh Sargent|FW|25|73', 'Oscar Schwartau|FW|18|66|78'] },
       { name: 'Birmingham City', short: 'BIR', color: '#1B3C8C', rep: 64, league: 'ENG2', players: [
         'Ryan Allsop|GK|33|64', 'James Beadle|GK|21|66|75', 'Christoph Klarer|DF|25|69', 'Alfons Sampsted|DF|27|66',
         'Phillip Neumann|DF|28|67', 'Tomoki Iwata|MF|28|69', 'Paik Seung-ho|MF|28|68', 'Krystian Bielik|MF|27|69',

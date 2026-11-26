@@ -4,14 +4,14 @@ A football management game that runs in the browser. It has no dependencies and 
 
 Take charge of a club and manage the squad, tactics, transfers and finances across as many seasons as the board allows. There are two game worlds:
 
-- **Europe 2025/26:** 134 real clubs and about 2,400 real players as of the start of the 2025/26 season. It covers the Premier League and Championship (3 up, 3 down), La Liga, Serie A, Ligue 1 and the Bundesliga, all running at the same time. Each country has its own cup (FA Cup, Copa del Rey, Coppa Italia, Coupe de France, DFB-Pokal).
-  - **Champions League:** the real 36-club 2025/26 field, including 14 clubs from outside these leagues, such as Benfica, PSV and Galatasaray, which play only in Europe. It has an 8-game league phase, then a knockout play-off, round of 16, quarter-finals, semi-finals and final. Knockout ties are single matches, a simplification.
-  - **Qualification:** from the second season, the top 5 in England and Spain and the top 4 in Italy, Germany and France qualify, along with the same 14 other clubs.
-  - **Simplifications:** only England has a second tier, so La Liga, Serie A, Ligue 1 and the Bundesliga have no relegation. A season is 65 weeks.
+- **Europe 2025/26:** 166 real clubs and about 2,700 real players as of the start of the 2025/26 season. It covers the Premier League and Championship (3 up, 3 down), La Liga, Serie A, Ligue 1, the Bundesliga, the Eredivisie and the Primeira Liga, all running at the same time. Each country has its own cup (FA Cup, Copa del Rey, Coppa Italia, Coupe de France, DFB-Pokal, KNVB Cup, Taça de Portugal).
+  - **Champions League:** the real 36-club 2025/26 field, including 10 clubs from outside these leagues, such as Galatasaray, Club Brugge and Olympiacos, which play only in Europe. It has an 8-game league phase, then a knockout play-off, round of 16, quarter-finals, semi-finals and final. Knockout ties are single matches, a simplification.
+  - **Qualification:** from the second season, the top 5 in England and Spain and the top 4 in Italy, Germany and France and the top 2 in the Netherlands and Portugal qualify, along with the same 10 other clubs.
+  - **Simplifications:** only England has a second tier, so the other leagues have no relegation. A season is 65 weeks.
 - **England only:** just the Premier League and Championship.
 - **Fictional:** 24 invented clubs in two divisions of 12, with randomly generated players.
 
-> The real-football data in `data/` (`england.js`, `spain.js`, `italy.js`, `france.js`, `germany.js`, `europe.js`) is an unofficial, best-effort snapshot. Squads may be out of date (transfers after summer 2025 aren't included), ages are approximate, and the ratings are editorial estimates rather than official figures. Partially known squads, mostly smaller clubs, are topped up with generated players. No club crests or logos are used, only names and kit colours. Edit the file to update squads or ratings: each player is `"Name|POS|age|rating|potential"`.
+> The real-football data in `data/` (`england.js`, `spain.js`, `italy.js`, `france.js`, `germany.js`, `netherlands.js`, `portugal.js`, `europe.js`) is an unofficial, best-effort snapshot. Squads may be out of date (transfers after summer 2025 aren't included), ages are approximate, and the ratings are editorial estimates rather than official figures. Partially known squads, mostly smaller clubs, are topped up with generated players. No club crests or logos are used, only names and kit colours. Edit the file to update squads or ratings: each player is `"Name|POS|age|rating|potential"`.
 
 ## Play
 
