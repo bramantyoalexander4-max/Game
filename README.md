@@ -17,10 +17,19 @@ Take charge of a club and manage the squad, tactics, transfers and finances acro
   - Each summer there's a tournament: the World Cup in 2026 and 2030, the Euros in 2028. Qualifying groups of 4 lead to a 24-team finals with 6 groups, then a round of 16. There are no tournaments in odd years, so those seasons are friendlies.
   - The federation sets a target from your world ranking. Missing it by one stage earns a warning; a second miss, or missing by two stages, gets you sacked.
   - In club careers the internationals run in the background, and you can follow them in League → International.
-- **World 2025/26:** everything in the Europe world, plus Scotland, Austria, Switzerland, Brazil, Argentina, the USA (MLS), Mexico, Saudi Arabia, Japan and South Korea. That's 26 countries, 470 clubs and 10,500 players.
+- **World 2025/26:** everything in the Europe world, plus Scotland, Austria, Switzerland, Brazil, Argentina, the USA (MLS), Mexico, Saudi Arabia, Japan, South Korea and Indonesia (Super League). That's 27 countries and 488 clubs.
   - Each country has its own cup, and every club and national team is manageable.
   - Stars include Messi at Inter Miami, Neymar at Santos, Ronaldo and Benzema in Saudi Arabia, and Son at LAFC. Squads outside the big leagues are mostly generated.
   - It's the biggest world, so it runs slower on older phones.
+- **Copa Libertadores and AFC Champions League (World world):** 16 clubs each, qualifying through their leagues.
+  - The Libertadores takes 8 clubs from Brazil and 8 from Argentina. The AFC Champions League takes 4 each from Saudi Arabia, Japan, South Korea and Indonesia.
+  - Four groups of four, home and away, then quarter-finals, semi-finals and a final.
+  - They're played in the same weeks as the Champions League, so the season doesn't get longer.
+- **Indonesia:** an 18-club Super League. The national team uses its naturalised internationals (Idzes, Audero, Paes, Verdonk, Diks, Hilgers, Romeny, Haye and others).
+- **👑 Legends market (Transfers → Legends):** 45 all-time greats at their peak (age 27), such as Pelé, Maradona, Ronaldinho, Beckham, Zidane, Ronaldo Nazário, Cruyff and Maldini.
+  - Each legend can be signed once per career, and only by you, for a big fee.
+  - Legends age normally from then on, and they're eligible for their national teams.
+  - The ratings are playful estimates of each player at his best.
 - **Nations League:** in years without a World Cup or Euro, European national teams play the Nations League instead of friendlies.
   - Leagues A, B and C have groups of 4 over the 6 international breaks.
   - Group winners go up and bottom sides go down, in equal numbers so the leagues keep their size.
@@ -29,7 +38,7 @@ Take charge of a club and manage the squad, tactics, transfers and finances acro
 - **England only:** just the Premier League and Championship.
 - **Fictional:** 24 invented clubs in two divisions of 12, with randomly generated players.
 
-> The real-football data in `data/` (`england.js`, `spain.js`, `italy.js`, `france.js`, `germany.js`, `netherlands.js`, `portugal.js`, `others.js`, `world.js`, `europe.js`, `nations.js`) is an unofficial, best-effort snapshot. Squads may be out of date (transfers after summer 2025 aren't included), ages are approximate, and the ratings are editorial estimates rather than official figures. Partially known squads, mostly smaller clubs, are topped up with generated players. No club crests or logos are used, only names and kit colours. Edit the file to update squads or ratings: each player is `"Name|POS|age|rating|potential"`.
+> The real-football data in `data/` (`england.js`, `spain.js`, `italy.js`, `france.js`, `germany.js`, `netherlands.js`, `portugal.js`, `others.js`, `world.js`, `europe.js`, `nations.js`, `legends.js`) is an unofficial, best-effort snapshot. Squads may be out of date (transfers after summer 2025 aren't included), ages are approximate, and the ratings are editorial estimates rather than official figures. Partially known squads, mostly smaller clubs, are topped up with generated players. No club crests or logos are used, only names and kit colours. Edit the file to update squads or ratings: each player is `"Name|POS|age|rating|potential"`.
 
 ## Play
 

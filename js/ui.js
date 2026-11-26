@@ -355,8 +355,12 @@
           <div class="btns"><button class="btn primary" data-a="skip-to-next">⏩ Simulate the tournament</button><button class="btn" data-a="skip-week">One day</button></div></div>`;
       } else if (slot.type === 'league') cupNote = `There's no ${esc(E.divName(E.userClub().div))} game this week.`;
       else if (slot.type === 'cl') {
-        const r = E.clResult(g.userClub);
-        cupNote = r === null ? `It's a ${esc(E.clName())} week and you're not in it this season.` : `It's a ${esc(E.clName())} week. You're out: ${esc(r.toLowerCase())}.`;
+        const r = E.clResult(g.userClub), ci = E.ccOf(g.userClub);
+        if (ci >= 0) {
+          const cr = E.ccResult(g.userClub);
+          cupNote = cr === 'Still in' ? `It's a continental week, but the ${esc(g.ccs[ci].name)} has no game for you this week.` : `It's a continental week. You're out of the ${esc(g.ccs[ci].name)}: ${esc(cr.toLowerCase())}.`;
+        } else cupNote = r === null ? "It's a continental week and you're not in a continental competition this season."
+          : `It's a ${esc(E.clName())} week. You're out: ${esc(r.toLowerCase())}.`;
       } else {
         const cup = g.cups[E.userCupIdx()];
         const round = cup ? slot.k - cup.offset : -1;
@@ -370,7 +374,7 @@
       const fx = E.userFixture();
       const h = E.club(fx.home), a = E.club(fx.away);
       const cup = !!fx.ko;
-      const icon = fx.comp === 'CL' ? '⭐ ' : fx.comp === 'CUP' ? '🏆 ' : `${esc(E.divName(E.userClub().div))} · `;
+      const icon = fx.comp === 'CL' ? '⭐ ' : fx.comp === 'CC' ? `${g.ccs[fx.cc].icon} ` : fx.comp === 'CUP' ? '🏆 ' : `${esc(E.divName(E.userClub().div))} · `;
       const lineup = E.validateLineup(g.userClub);
       top = `<div class="card">
         <div class="row between small muted"><span>${icon}${esc(E.weekLabel(g.week))}</span><span>${fx.home === g.userClub ? 'Home' : 'Away'}</span></div>
@@ -400,9 +404,9 @@
   // the fixtures that matter for a league in a week: its games, its country's cup ties, or European ties
   function relevantFixtures(w, div = E.userClub().div) {
     const ci = E.cupOfCountry(E.divCountry(div));
-    return E.fixturesForWeek(w).filter((f) => (f.comp === 'L' && f.div === div) || (f.comp === 'CUP' && f.cup === ci) || f.comp === 'CL');
+    return E.fixturesForWeek(w).filter((f) => (f.comp === 'L' && f.div === div) || (f.comp === 'CUP' && f.cup === ci) || f.comp === 'CL' || f.comp === 'CC');
   }
-  const sameComp = (a, b) => a.comp === b.comp && (a.comp !== 'L' || a.div === b.div) && (a.comp !== 'CUP' || a.cup === b.cup);
+  const sameComp = (a, b) => a.comp === b.comp && (a.comp !== 'L' || a.div === b.div) && (a.comp !== 'CUP' || a.cup === b.cup) && (a.comp !== 'CC' || a.cc === b.cc);
   function fxRow(f) {
     const h = E.club(f.home), a = E.club(f.away), me = G().userClub;
     const bold = (c) => (c.id === me ? 'font-weight:800;color:var(--accent)' : '');
@@ -429,7 +433,7 @@
     const inXI = p.club === G().userClub && E.userClub().lineup.some((l) => l.pid === p.id);
     return `<div class="item tap" data-a="${action}" data-id="${p.id}">
       ${posTag(p.pos)}<div class="ovr">${p.ovr}</div>
-      <div class="grow"><div class="name">${esc(p.name)}${wk(p)}</div>
+      <div class="grow"><div class="name">${p.legend ? '👑 ' : ''}${esc(p.name)}${wk(p)}</div>
         <div class="small muted">${p.age}y · pot ${potText(p)} · ${M(E.playerValue(p))}${extra}</div></div>
       ${p.injury ? `<span class="tag inj">INJ ${p.injury}w</span>` : inXI ? '<span class="tag xi">XI</span>' : ''}
       ${p.club !== null && p.contract <= 1 ? '<span class="tag exp">EXP</span>' : ''}
@@ -541,7 +545,8 @@
         : `<p class="small" style="color:var(--warn)">${esc(chk.why)}</p>`;
     }
     openModal(`<div class="row">${posTag(p.pos)}<div class="ovr" style="font-size:26px;width:auto">${p.ovr}</div>
-        <div class="grow"><b style="font-size:18px">${esc(p.name)}${wk(p)}</b><div class="small muted">${c ? esc(c.name) : 'Free agent'}</div></div></div>
+        <div class="grow"><b style="font-size:18px">${p.legend ? '👑 ' : ''}${esc(p.name)}${wk(p)}</b><div class="small muted">${c ? esc(c.name) : 'Free agent'}</div></div></div>
+      ${p.legend ? '<div class="wkcard">👑 <b>Legend.</b> One of the all-time greats.</div>' : ''}
       ${E.isWonderkid(p) ? `<div class="wkcard">🌟 <b>Wonderkid.</b> One of the most talented young players around${mine ? ': give him minutes and he will fly.' : '.'}</div>` : ''}
       <div class="kv">
         <span>Age</span><span>${p.age}</span>
@@ -640,6 +645,7 @@
     const g = G();
     const div = ui.leagueDiv || E.userClub().div;
     const views = [['table', 'Table'], ['fixtures', 'Fixtures'], ['cup', 'Cup'], ...(E.clName() ? [['europe', 'Europe']] : []),
+      ...(g.ccs || []).map((cc, i) => [`cc${i}`, cc.key === 'LIB' ? 'Libertadores' : cc.key === 'ACL' ? 'Asia' : cc.name]),
       ...(g.intl ? [['intl', 'International']] : []), ['stats', 'Scorers']];
     const toggle = `<div class="chips" style="margin-bottom:4px">${views.map(([k, l]) =>
       `<button class="btn ${ui.leagueView === k ? 'on' : ''}" data-a="league-view" data-v="${k}">${l}</button>`).join('')}</div>`;
@@ -657,6 +663,7 @@
     if (ui.leagueView === 'cup') return toggle + divChips + viewCup(div);
     if (ui.leagueView === 'europe') return toggle + viewEurope();
     if (ui.leagueView === 'intl') return toggle + viewInternational();
+    if (/^cc\d+$/.test(ui.leagueView) && g.ccs && g.ccs[+ui.leagueView.slice(2)]) return toggle + viewCC(+ui.leagueView.slice(2));
     if (ui.leagueView === 'stats') {
       const ps = Object.values(g.players).filter((p) => p.club !== null && E.club(p.club).div === div && (p.goals || p.assists))
         .sort((a, b) => b.goals - a.goals || b.assists - a.assists).slice(0, 25);
@@ -707,6 +714,22 @@
           <div class="list">${fx.map(fxRow).join('') || '<div class="news muted">Not drawn yet.</div>'}</div>`;
       }).join('')}`;
   }
+  function viewCC(ci) {
+    const g = G(), cc = g.ccs[ci], me = g.userClub;
+    const res = E.ccResult(me);
+    const status = cc.winner !== null ? `${cc.icon} ${esc(E.club(cc.winner).name)} won the ${esc(cc.name)}.`
+      : E.ccOf(me) === ci ? (res === 'Still in' ? `You're still in the ${esc(cc.name)}.` : `You're out: ${esc(res.toLowerCase())}.`) : '';
+    const tbl = (ids) => `<div class="list"><table><tr><th>#</th><th class="l">Club</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th></tr>
+      ${E.groupStandings(ids, cc.table).map((id, i) => { const c = E.club(id), t = cc.table[id]; return `<tr class="${id === me ? 'me' : ''} ${i < 2 ? 'zone-up' : ''}">
+        <td>${i + 1}</td><td class="l"><span class="dot" style="background:${c.color}"></span>${esc(c.name)}</td>
+        <td>${t.p}</td><td>${t.w}</td><td>${t.d}</td><td>${t.l}</td><td>${t.gf - t.ga > 0 ? '+' : ''}${t.gf - t.ga}</td><td><b>${t.pts}</b></td></tr>`; }).join('')}</table></div>`;
+    const ko = g.fixtures.filter((f) => f.comp === 'CC' && f.cc === ci && f.stage === 'K');
+    return `<div class="card"><b>${cc.icon} ${esc(cc.name)}</b><p class="small muted" style="margin:6px 0">16 clubs qualify through their leagues. Four groups of four (home and away), the top two reach the quarter-finals; single-match knockouts with penalties after a draw.</p>
+        ${status ? `<p style="margin:0">${status}</p>` : ''}</div>
+      ${E.CC_KO.map((name, r) => { const fx = ko.filter((f) => f.round === r); return fx.length ? `<h2>${name}</h2><div class="list">${fx.map(fxRow).join('')}</div>` : ''; }).join('')}
+      ${cc.groups.map((grp, i) => ({ grp, i })).sort((a, b) => b.grp.includes(me) - a.grp.includes(me))
+        .map(({ grp, i }) => `<h2>Group ${'ABCD'[i]}${grp.includes(me) ? ' (yours)' : ''}</h2>${tbl(grp)}`).join('')}`;
+  }
   function viewEurope() {
     const g = G();
     const name = esc(E.clName());
@@ -737,8 +760,21 @@
   }
 
   // ---------- transfers ----------
+  function viewLegends() {
+    const u = E.userClub();
+    const list = E.legendsMarket();
+    return `<h2>Transfer market</h2>
+      <div class="chips">${['ALL', 'LEG', 'WK', 'GK', 'DF', 'MF', 'FW'].map((p) => `<button class="btn ${ui.marketPos === p ? 'on' : ''}" data-a="mpos" data-p="${p}">${p === 'WK' ? '🌟 Wonderkids' : p === 'LEG' ? '👑 Legends' : p}</button>`).join('')}</div>
+      <div class="wkcard">👑 <b>Exclusive legends.</b> The greatest players of all time, available at their peak (age 27). Each legend can be signed <b>once per career</b>, and only by you. Budget ${M(u.budget)}.</div>
+      <div class="list">${list.map((l) => `<div class="item">
+        ${posTag(l.pos)}<div class="ovr" style="color:var(--accent2)">${l.ovr}</div>
+        <div class="grow"><div class="name">👑 ${esc(l.name)}</div><div class="small muted">${esc((E.nationMeta()[l.nat] || { name: l.nat }).name)} · ${l.signed ? `signed by ${esc(l.signed.club)} (${esc(l.signed.season)})` : M(l.price)}</div></div>
+        ${l.signed ? '<span class="tag">SIGNED</span>' : `<button class="btn ${u.budget >= l.price ? 'primary' : ''}" data-a="legend" data-n="${esc(l.name)}">Sign</button>`}</div>`).join('')}</div>
+      <p class="small muted">Legends are a fun extra: ratings are playful estimates of each player at his best. They age like anyone else from here.</p>`;
+  }
   function viewTransfers() {
     const g = G();
+    if (ui.marketPos === 'LEG') return viewLegends();
     const q = ui.marketQuery.toLowerCase();
     const wkOnly = ui.marketPos === 'WK';
     const leagueOk = (p) => ui.marketLeague === 'ALL' || (ui.marketLeague === 'FREE' ? p.club === null
@@ -750,7 +786,7 @@
       .sort(wkOnly ? (a, b) => E.potentialRange(b)[1] - E.potentialRange(a)[1] || b.ovr - a.ovr : (a, b) => b.ovr - a.ovr).slice(0, 60);
     const maxes = [[0, 'Any price'], [1e6, '≤ £1M'], [3e6, '≤ £3M'], [6e6, '≤ £6M'], [12e6, '≤ £12M']];
     return `<h2>Transfer market</h2>
-      <div class="chips">${['ALL', 'WK', 'GK', 'DF', 'MF', 'FW'].map((p) => `<button class="btn ${ui.marketPos === p ? 'on' : ''}" data-a="mpos" data-p="${p}">${p === 'WK' ? '🌟 Wonderkids' : p}</button>`).join('')}</div>
+      <div class="chips">${['ALL', 'LEG', 'WK', 'GK', 'DF', 'MF', 'FW'].map((p) => `<button class="btn ${ui.marketPos === p ? 'on' : ''}" data-a="mpos" data-p="${p}">${p === 'WK' ? '🌟 Wonderkids' : p === 'LEG' ? '👑 Legends' : p}</button>`).join('')}</div>
       ${wkOnly ? `<p class="small muted">Every player aged ${E.WK_AGE} or under with elite potential. Their exact potential and personality are only rumours until you pay for a scout report. Clubs charge a premium for them, and big clubs will try to snatch them first.</p>` : ''}
       <div class="row" style="margin-bottom:10px">
         <input class="grow" id="mq" placeholder="Search name…" value="${esc(ui.marketQuery)}">
@@ -888,7 +924,7 @@
   function skipWeek() {
     const others = E.playOtherMatches(null);
     const ci = E.userCupIdx();
-    const shown = others.filter((f) => (f.comp === 'L' && f.div === E.userClub().div) || (f.comp === 'CUP' && f.cup === ci) || f.comp === 'CL');
+    const shown = others.filter((f) => (f.comp === 'L' && f.div === E.userClub().div) || (f.comp === 'CUP' && f.cup === ci) || f.comp === 'CL' || f.comp === 'CC');
     openModal(`<h2 style="margin-top:0">${esc(E.weekLabel(G().week))}</h2>
       <div class="list">${shown.map(fxRow).join('') || '<div class="news muted">No matches.</div>'}</div>
       <button class="btn primary block" data-a="next-week">Continue</button>`);
@@ -923,11 +959,13 @@
       <div class="kv">
         ${s.champions.map((c) => `<span>${esc(c.league)} champions</span><span>🏆 ${esc(c.club)}</span>`).join('')}
         ${s.clName && s.clWinner ? `<span>${esc(s.clName)}</span><span>⭐ ${esc(s.clWinner)}</span>` : ''}
+        ${(s.ccs || []).map((c) => `<span>${esc(c.name)}</span><span>${c.icon} ${esc(c.winner)}</span>`).join('')}
         ${intlLine}
         <span>${esc(s.cupName)}</span><span>🏆 ${esc(s.cupWinner)}</span>
         <span>Your finish</span><span>${E.ordinal(s.position)} in the ${esc(E.divName(s.division))} (${s.points} pts)</span>
         <span>Your cup run</span><span>${esc(s.cup)}</span>
         ${s.cl ? `<span>Your ${esc(s.clName)} run</span><span>${esc(s.cl)}</span>` : ''}
+        ${s.cc ? `<span>Your ${esc(s.ccName)} run</span><span>${esc(s.cc)}</span>` : ''}
         <span>Board target</span><span>${E.ordinal(s.expected)}</span>
         <span>Prize money</span><span>${M(s.prize)}</span>
         <span>Golden boot</span><span>${esc(s.topScorer)}</span>
@@ -937,6 +975,7 @@
       ${s.move === 'up' ? `<p style="color:var(--accent);font-weight:800">⬆️ PROMOTED TO THE ${esc(E.divName(E.userClub().div).toUpperCase())}!</p>` : ''}
       ${s.move === 'down' ? `<p style="color:var(--bad);font-weight:800">⬇️ Relegated to the ${esc(E.divName(E.userClub().div))}.</p>` : ''}
       ${s.qualified ? `<p style="color:var(--accent2);font-weight:800">⭐ Qualified for next season's ${esc(s.clName)}!</p>` : ''}
+      ${s.qualifiedCC ? `<p style="color:var(--accent2);font-weight:800">🏆 Qualified for next season's ${esc(s.qualifiedCC)}!</p>` : ''}
       <p><b>${esc(s.verdict)}</b></p>
       ${s.promoted.length ? `<p class="small muted">⬆️ Up: ${s.promoted.map(esc).join(', ')} · ⬇️ Down: ${s.relegated.map(esc).join(', ')}</p>` : ''}
       ${s.retired.length ? `<p class="small"><b>Retired:</b> ${s.retired.map(esc).join(', ')}</p>` : ''}
@@ -1044,6 +1083,16 @@
         ui.resultsWeek = Math.max(0, Math.min(E.totalWeeks() - 1, cur + +d.d)); render(); break;
       }
       case 'mpos': ui.marketPos = d.p; render(); break;
+      case 'legend': {
+        const nm = d.n;
+        const l = E.legendsMarket().find((x) => x.name === nm);
+        ask(`Sign ${nm} (${l.pos}, ${l.ovr}) for ${M(l.price)}? This is a one-time chance: once signed, no one else can ever have him.`, 'Sign the legend', () => {
+          const r = E.signLegend(nm);
+          if (r.ok) { save(); toast(`👑 ${nm} has signed!`); } else toast(r.why);
+          render();
+        });
+        break;
+      }
       case 'scout': {
         const r = E.scoutPlayer(+d.id);
         if (r.ok) { save(); playerModal(+d.id); render(); toast('Scout report received 🔍'); } else toast(r.why);

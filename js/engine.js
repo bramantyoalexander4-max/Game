@@ -2,7 +2,7 @@
 (function (root) {
   'use strict';
 
-  const SAVE_VERSION = 8;
+  const SAVE_VERSION = 9;
   let G = null; // current game state
 
   // ---------- random ----------
@@ -102,9 +102,11 @@
     continental: null,
     clubs: CLUBS.map((c) => ({ ...c, league: c.div === 1 ? 'D1' : 'D2' })),
   };
-  function buildWorld(id, name, short, note, packs, continental) {
+  function buildWorld(id, name, short, note, packs, continental, extraCups) {
     const w = { id, name, short, note, startYear: 2025, autoEconomy: true, prizeScale: 2.5,
-      leagues: [], promotions: [], cups: [], clubs: [], continental: null };
+      leagues: [], promotions: [], cups: [], clubs: [], continental: null, ccs: [] };
+    const countries = new Set(packs.map((pk) => pk.country));
+    (extraCups || []).forEach((cc) => { if (Object.keys(cc.slots).every((c) => countries.has(c))) w.ccs.push(cc); });
     packs.forEach((pk) => {
       pk.leagues.forEach((l) => w.leagues.push({ ...l, country: pk.country }));
       w.promotions.push(...(pk.promotions || []));
@@ -128,11 +130,11 @@
     // and the big leagues of the Americas and Asia
     const worldKeys = ['england', 'spain', 'italy', 'france', 'germany', 'netherlands', 'portugal', 'scotland', 'austria',
       'switzerland', 'turkey', 'belgium', 'greece', 'czechia', 'denmark', 'norway', 'azerbaijan', 'cyprus', 'kazakhstan',
-      'brazil', 'argentina', 'usa', 'mexico', 'saudi', 'japan', 'korea'].filter((k) => C[k]);
+      'brazil', 'argentina', 'usa', 'mexico', 'saudi', 'japan', 'korea', 'indonesia'].filter((k) => C[k]);
     if (worldKeys.length > keys.length && ROOT.TM_CONTINENTAL) {
       worlds.push(buildWorld('world', 'Real football — World 2025/26', 'World 2025/26',
         `Every league in the Europe world plus Scotland, Austria, Switzerland, Brazil, Argentina, the USA (MLS), Mexico, Saudi Arabia, Japan and South Korea: ${worldKeys.length} countries. The biggest world — slower on older phones. Real clubs and players as of the start of the 2025/26 season; squads outside the big leagues are mostly generated.`,
-        worldKeys.map((k) => C[k]), ROOT.TM_CONTINENTAL));
+        worldKeys.map((k) => C[k]), ROOT.TM_CONTINENTAL, ROOT.TM_CONTINENTAL_EXTRA));
     }
     if (keys.length >= 2 && ROOT.TM_CONTINENTAL) {
       worlds.push(buildWorld('europe', 'Real football — Europe 2025/26', 'Europe 2025/26',
@@ -295,7 +297,7 @@
       seed: (seed === undefined ? Math.floor(Math.random() * 2 ** 31) : seed) >>> 0,
       manager: managerName || 'Manager',
       season: 1, week: 0, userClub: national ? 0 : clubIndex, mode: national ? 'national' : 'club',
-      nations: [], intl: null,
+      nations: [], intl: null, ccs: [], ccNext: {}, legendsSigned: {},
       clubs: [], players: {}, freeAgents: [], nextPid: 1,
       fixtures: [], calendar: [], cups: [], cl: null, clNext: null, news: [], history: [], training: 'normal',
       boardWarning: false, gameOver: false, seasonOver: false,
@@ -303,6 +305,8 @@
         dataset: ds.id,
         leagues: ds.leagues.map((l) => ({ name: l.name, country: l.country, tier: l.tier, cycles: l.cycles || 2 })),
         nations: !!ds.nations,
+        ccs: (ds.ccs || []).map((cc) => ({ key: cc.key, name: cc.name, icon: cc.icon,
+          slots: Object.fromEntries(Object.entries(cc.slots).map(([country, n]) => [ds.leagues.findIndex((l) => l.country === country && l.tier === 1) + 1, n])) })),
         promotions: ds.promotions.map((p) => ({ up: leagueIndex(ds, p.up), down: leagueIndex(ds, p.down), count: p.count })),
         cupsDef: ds.cups,
         cl: ds.continental ? { name: ds.continental.name, slots: Object.fromEntries(Object.entries(ds.continental.slots).map(([k, v]) => [leagueIndex(ds, k), v])) } : null,
@@ -463,7 +467,69 @@
       G.calendar.forEach((c, i) => { if (c.type === 'cl' && c.lp !== undefined) lpWeek[c.lp] = i; });
       clLeaguePhase(clIds).forEach(([h, a, md]) => G.fixtures.push({ comp: 'CL', stage: 'lp', md, week: lpWeek[md], home: h, away: a, played: false, hg: 0, ag: 0 }));
     }
+    scheduleContinentalCups();
     if (G.meta.nations && G.nations && G.nations.length) scheduleIntl();
+  }
+  // ---------- continental cups outside Europe (Copa Libertadores, AFC Champions League) ----------
+  const CC_KO = ['Quarter-final', 'Semi-final', 'Final'];
+  const ccMoney = () => { const m = clMoney(); return { entry: m.entry * 0.3, win: m.win * 0.4, draw: m.draw * 0.4, ko: [m.ko[2], m.ko[3], m.ko[4]].map((v) => v * 0.4) }; };
+  function scheduleContinentalCups() {
+    G.ccs = [];
+    if (!G.meta.ccs || !G.meta.ccs.length || !G.calendar.some((c) => c.type === 'cl')) return;
+    const lpWeek = {};
+    G.calendar.forEach((c, i) => { if (c.type === 'cl' && c.lp !== undefined) lpWeek[c.lp] = i; });
+    const RR = [[[0, 1], [2, 3]], [[0, 2], [1, 3]], [[0, 3], [1, 2]]];
+    G.meta.ccs.forEach((def) => {
+      // last season's qualifiers, or (first season) the strongest clubs of each league
+      let ids = (G.ccNext && G.ccNext[def.key]) || [];
+      if (!ids.length) {
+        Object.entries(def.slots).forEach(([div, n]) => {
+          ids.push(...G.clubs.filter((c) => c.div === +div).sort((a, b) => b.rep - a.rep).slice(0, n).map((c) => c.id));
+        });
+      }
+      ids = ids.filter((id) => club(id)).slice(0, 16);
+      if (ids.length < 16) return;
+      const seeded = [...ids].sort((a, b) => club(b).rep - club(a).rep);
+      const pots = [0, 1, 2, 3].map((k) => shuffle(seeded.slice(k * 4, k * 4 + 4)));
+      const cc = { key: def.key, name: def.name, icon: def.icon, clubs: ids, groups: [0, 1, 2, 3].map((g) => pots.map((pot) => pot[g])),
+        table: {}, winner: null, runnerUp: null };
+      const ci = G.ccs.push(cc) - 1;
+      ids.forEach((id) => { cc.table[id] = blankTable(); club(id).budget += ccMoney().entry; });
+      cc.groups.forEach((grp, g) => {
+        for (let r = 0; r < 6; r++) RR[r % 3].forEach(([x, y]) => G.fixtures.push({ comp: 'CC', cc: ci, stage: 'G', group: g, md: r, week: lpWeek[r],
+          home: r < 3 ? grp[x] : grp[y], away: r < 3 ? grp[y] : grp[x], played: false, hg: 0, ag: 0 }));
+      });
+    });
+  }
+  function ccDraw(week, j) {
+    const r = j - 2; // the cups' quarter-finals, semi-finals and final share the Champions League's last three rounds
+    if (r < 0) return;
+    G.ccs.forEach((cc, ci) => {
+      if (G.fixtures.some((f) => f.comp === 'CC' && f.cc === ci && f.stage === 'K' && f.round === r)) return;
+      let pairs;
+      if (r === 0) {
+        const st = cc.groups.map((grp) => groupStandings(grp, cc.table));
+        pairs = [[st[0][0], st[1][1]], [st[1][0], st[0][1]], [st[2][0], st[3][1]], [st[3][0], st[2][1]]];
+      } else {
+        const w = G.fixtures.filter((f) => f.comp === 'CC' && f.cc === ci && f.stage === 'K' && f.round === r - 1).sort((a, b) => a.tie - b.tie).map((f) => f.winner);
+        pairs = Array.from({ length: w.length / 2 }, (_, t) => [w[2 * t], w[2 * t + 1]]);
+      }
+      pairs.forEach(([h, a], tie) => G.fixtures.push({ comp: 'CC', cc: ci, stage: 'K', round: r, tie, ko: true, week, home: h, away: a, played: false, hg: 0, ag: 0 }));
+      const uf = pairs.find((pr) => pr.includes(G.userClub));
+      if (uf) pushNews(`${cc.icon} ${cc.name} ${CC_KO[r].toLowerCase()}: ${club(uf[0]).name} v ${club(uf[1]).name}.`);
+    });
+  }
+  const ccOf = (cid) => G.ccs ? G.ccs.findIndex((cc) => cc.clubs.includes(cid)) : -1;
+  function ccResult(cid) {
+    const ci = ccOf(cid);
+    if (ci < 0) return null;
+    const cc = G.ccs[ci];
+    if (cc.winner === cid) return 'Winners';
+    const lost = G.fixtures.find((f) => f.comp === 'CC' && f.cc === ci && f.stage === 'K' && f.played && (f.home === cid || f.away === cid) && f.winner !== cid);
+    if (lost) return lost.round === CC_KO.length - 1 ? 'Runners-up' : `Out in ${CC_KO[lost.round].toLowerCase()}`;
+    const groupDone = G.fixtures.filter((f) => f.comp === 'CC' && f.cc === ci && f.stage === 'G').every((f) => f.played);
+    const inKo = G.fixtures.some((f) => f.comp === 'CC' && f.cc === ci && f.stage === 'K' && (f.home === cid || f.away === cid));
+    return groupDone && !inKo ? 'Out in group stage' : 'Still in';
   }
   function clLeaguePhase(ids) {
     // 8 different opponents each: link every club to those 1, 2, 3 and 5 places along a shuffled
@@ -491,7 +557,7 @@
       || t[b].gf - t[a].gf || club(b).rep - club(a).rep);
   }
   function clDraw(week, j) {
-    if (!G.cl || fixturesForWeek(week).length) return;
+    if (!G.cl || fixturesForWeek(week).some((f) => f.comp === 'CL')) return;
     const add = (pairs) => pairs.forEach(([h, a], tie) => G.fixtures.push({ comp: 'CL', stage: 'ko', round: j, tie, ko: true, week, home: h, away: a, played: false, hg: 0, ag: 0 }));
     const winnersOf = (r) => G.fixtures.filter((f) => f.comp === 'CL' && f.stage === 'ko' && f.round === r).sort((a, b) => a.tie - b.tie).map((f) => f.winner);
     if (j === 0) {
@@ -515,7 +581,7 @@
   function cupDraw(week) {
     const cal = G.calendar[week];
     if (!cal) { if (G.intl) intlDraw(week); return; }
-    if (cal.type === 'cl' && cal.ko !== undefined) { clDraw(week, cal.ko); return; }
+    if (cal.type === 'cl' && cal.ko !== undefined) { clDraw(week, cal.ko); ccDraw(week, cal.ko); return; }
     if (cal.type !== 'cup') return;
     G.cups.forEach((cup, ci) => {
       const r = cal.k - cup.offset;
@@ -550,6 +616,7 @@
   function tiePrize(fx) {
     if (fx.comp === 'CUP') return G.cups[fx.cup].prizes[fx.round];
     if (fx.comp === 'CL' && fx.stage === 'ko') return clMoney().ko[fx.round];
+    if (fx.comp === 'CC' && fx.stage === 'K') return ccMoney().ko[fx.round];
     return 0;
   }
   function weekLabel(w, div = userClub().div) {
@@ -566,7 +633,12 @@
       const r = cup ? c.k - cup.offset : -1;
       return r >= 0 ? `${cup.name} · ${cup.rounds[r]}` : 'Cup week';
     }
-    if (c.type === 'cl') return c.lp !== undefined ? `${clName()} · League phase ${c.lp + 1}` : `${clName()} · ${CL_KO_ROUNDS[c.ko]}`;
+    if (c.type === 'cl') {
+      const cf = fixturesForWeek(w).find((x) => x.comp === 'CC' && (x.home === G.userClub || x.away === G.userClub));
+      if (cf) return `${G.ccs[cf.cc].name} · ${cf.stage === 'G' ? `Group matchday ${cf.md + 1}` : CC_KO[cf.round]}`;
+      if (!G.cl) return 'Continental week';
+      return c.lp !== undefined ? `${clName()} · League phase ${c.lp + 1}` : `${clName()} · ${CL_KO_ROUNDS[c.ko]}`;
+    }
     const f = fixturesForWeek(w).find((x) => x.comp === 'L' && x.div === div);
     return f ? `Matchday ${f.md + 1}` : 'Rest week';
   }
@@ -873,28 +945,32 @@
       const loser = m.sides[1 - ws];
       const prize = tiePrize(fx);
       club(fx.winner).budget += prize;
-      const isCup = fx.comp === 'CUP';
-      const comp = isCup ? G.cups[fx.cup] : null;
-      const name = isCup ? comp.name : clName();
-      const rounds = isCup ? comp.rounds : CL_KO_ROUNDS;
+      const isCup = fx.comp === 'CUP', isCC = fx.comp === 'CC';
+      const comp = isCup ? G.cups[fx.cup] : isCC ? G.ccs[fx.cc] : null;
+      const name = isCup || isCC ? comp.name : clName();
+      const rounds = isCup ? comp.rounds : isCC ? CC_KO : CL_KO_ROUNDS;
+      const icon = isCup ? '🏆' : isCC ? comp.icon : '⭐';
       if (isCup) comp.alive = comp.alive.filter((id) => id !== loser);
       if (fx.round === rounds.length - 1) {
-        if (isCup) comp.winner = fx.winner; else G.cl.winner = fx.winner;
-        if (isCup ? (fx.cup === userCupIdx() || m.sides.includes(G.userClub)) : true) {
-          pushNews(`${isCup ? '🏆' : '⭐'} ${club(fx.winner).name} win the ${name}, beating ${club(loser).name}!`);
+        if (comp) comp.winner = fx.winner; else G.cl.winner = fx.winner;
+        if (isCC) comp.runnerUp = loser;
+        if (isCup ? (fx.cup === userCupIdx() || m.sides.includes(G.userClub)) : !isCC || m.sides.includes(G.userClub) || ccOf(G.userClub) === fx.cc) {
+          pushNews(`${icon} ${club(fx.winner).name} win the ${name}, beating ${club(loser).name}!`);
         }
       } else if (fx.winner === G.userClub) {
-        pushNews(`${isCup ? '🏆' : '⭐'} Through to the ${name} ${rounds[fx.round + 1].toLowerCase()} (+${money(prize)}).`);
+        pushNews(`${icon} Through to the ${name} ${rounds[fx.round + 1].toLowerCase()} (+${money(prize)}).`);
       } else if (loser === G.userClub) pushNews(`💔 Knocked out of the ${name} in the ${rounds[fx.round].toLowerCase()}.`);
     } else {
-      const cl = fx.comp === 'CL';
-      const [h, a] = cl ? [G.cl.table[fx.home], G.cl.table[fx.away]] : [club(fx.home).table, club(fx.away).table];
+      const cl = fx.comp === 'CL' || fx.comp === 'CC';
+      const tbl = fx.comp === 'CL' ? G.cl.table : fx.comp === 'CC' ? G.ccs[fx.cc].table : null;
+      const [h, a] = tbl ? [tbl[fx.home], tbl[fx.away]] : [club(fx.home).table, club(fx.away).table];
+      const money_ = fx.comp === 'CC' ? ccMoney() : clMoney();
       h.p++; a.p++; h.gf += fx.hg; h.ga += fx.ag; a.gf += fx.ag; a.ga += fx.hg;
       [h, a].forEach((t, i) => {
         const r = res[i];
         if (r === 'W') { t.w++; t.pts += 3; } else if (r === 'D') { t.d++; t.pts += 1; } else t.l++;
         t.form = [...t.form, r].slice(-5);
-        if (cl) club(m.sides[i]).budget += r === 'W' ? clMoney().win : r === 'D' ? clMoney().draw : 0;
+        if (cl) club(m.sides[i]).budget += r === 'W' ? money_.win : r === 'D' ? money_.draw : 0;
       });
     }
     m.sides.forEach((cid, s) => {
@@ -1325,7 +1401,8 @@
     if (!G.intl || !G.intl.kind) return null;
     return { kind: G.intl.kind, year: G.intl.year, name: intlName(),
       winner: G.intl.winner !== null ? club(G.intl.winner).name : '-', runnerUp: G.intl.runnerUp !== null ? club(G.intl.runnerUp).name : '-',
-      mine: G.mode === 'national' ? (G.intl.format === 'nl' ? nlResultText(G.userClub) : STAGE_TEXT[intlStage(G.userClub)]) : null };
+      mine: G.mode !== 'national' ? null : G.intl.format === 'nl' ? nlResultText(G.userClub)
+        : G.intl.kind === 'Euro' && userClub().conf !== 'UEFA' ? 'Friendlies only' : STAGE_TEXT[intlStage(G.userClub)] };
   }
   function nlResultText(id) {
     const I = G.intl;
@@ -1367,6 +1444,44 @@
       G.gameOverReason = `${STAGE_TEXT[got]} at the ${intlName()} when the federation expected you to ${EXPECT_TEXT[want].toLowerCase()}.`;
     }
     G.history.push({ season: G.season, national: true, result: `${intlName()}: ${STAGE_TEXT[got]}` });
+  }
+
+  // ---------- exclusive legends ----------
+  function legendDefs() {
+    return ((ROOT.TM_LEGENDS) || []).map((str) => { const [name, pos, ovr, nat] = str.split('|'); return { name, pos, ovr: +ovr, nat }; });
+  }
+  function legendPlayer(def) {
+    const p = { id: G.nextPid++, name: def.name, pos: def.pos, age: 27, ovr: def.ovr, pot: def.ovr, fitness: 100, morale: 90, injury: 0,
+      apps: 0, goals: 0, assists: 0, yellow: 0, club: null, wage: 0, contract: 3, trait: 'Professional', seasonStart: def.ovr,
+      playTime: 0, legend: true, nat: G.meta.nations ? def.nat : undefined };
+    p.wage = Math.round(wageFor(p) * 1.2 / 100) * 100;
+    return p;
+  }
+  function legendPrice(def) {
+    const v = playerValue({ ovr: def.ovr, pot: def.ovr, age: 27 });
+    return Math.round(v * 0.8 * (G.meta.prizeScale || 1) / 100000) * 100000;
+  }
+  function legendsMarket() {
+    G.legendsSigned = G.legendsSigned || {};
+    return legendDefs().map((d) => ({ ...d, price: legendPrice(d), signed: G.legendsSigned[d.name] || null }))
+      .sort((a, b) => b.ovr - a.ovr || a.name.localeCompare(b.name));
+  }
+  function signLegend(name) {
+    if (G.mode === 'national') return { ok: false, why: 'Legends sign for clubs only.' };
+    const def = legendDefs().find((d) => d.name === name);
+    if (!def) return { ok: false, why: 'Unknown legend.' };
+    G.legendsSigned = G.legendsSigned || {};
+    if (G.legendsSigned[name]) return { ok: false, why: `${name} has already been signed (${G.legendsSigned[name].club}, ${G.legendsSigned[name].season}).` };
+    const u = userClub(), price = legendPrice(def);
+    if (u.squad.length >= MAX_SQUAD) return { ok: false, why: `Your squad is full (${MAX_SQUAD}).` };
+    if (u.budget < price) return { ok: false, why: `You need ${money(price)} to sign ${name}.` };
+    const p = legendPlayer(def);
+    u.budget -= price;
+    addPlayer(p, u.id);
+    p.contract = 3;
+    G.legendsSigned[name] = { club: u.name, season: seasonName() };
+    pushNews(`🌟🏆 LEGEND SIGNED: ${name} (${def.pos}, ${def.ovr}) joins ${u.name} for ${money(price)}!`);
+    return { ok: true, pid: p.id };
   }
 
   // ---------- youth academy ----------
@@ -1680,6 +1795,8 @@
       promoted: myMove ? myMove.up.map((c) => c.name) : [], relegated: myMove ? myMove.down.map((c) => c.name) : [],
       cupName: cupName(), cupWinner: uci >= 0 && G.cups[uci].winner !== null ? club(G.cups[uci].winner).name : '-', cup: cupResult(G.userClub),
       clName: clName(), clWinner: G.cl && G.cl.winner !== null ? club(G.cl.winner).name : null, cl: clResult(G.userClub),
+      ccs: (G.ccs || []).map((cc) => ({ name: cc.name, icon: cc.icon, winner: cc.winner !== null ? club(cc.winner).name : '-' })),
+      cc: ccResult(G.userClub), ccName: ccOf(G.userClub) >= 0 ? G.ccs[ccOf(G.userClub)].name : null,
       topScorer: topScorer ? `${topScorer.name} (${club(topScorer.club).short}) — ${topScorer.goals}` : '-',
       retired: [], youth: [], departed: [], graduatesLeft: [], verdict: '', move: null,
       goldenBoy: null, goldenBoyMine: false, nominees: [], qualified: false,
@@ -1702,6 +1819,14 @@
       G.clNext.push(...G.clubs.filter((c) => c.div === 0).map((c) => c.id));
       G.clNext = G.clNext.slice(0, 36); // the league phase needs 36 (later leagues' places drop off first)
       summary.qualified = G.clNext.includes(G.userClub);
+    }
+    if (G.meta.ccs && G.meta.ccs.length) {
+      G.ccNext = {};
+      G.meta.ccs.forEach((def) => {
+        G.ccNext[def.key] = [];
+        Object.entries(def.slots).forEach(([d, n]) => G.ccNext[def.key].push(...(tables[d] || []).slice(0, n).map((c) => c.id)));
+        if (G.ccNext[def.key].includes(G.userClub)) summary.qualifiedCC = def.name;
+      });
     }
     divs.forEach((d) => {
       const table = tables[d];
@@ -1731,7 +1856,9 @@
     else if (wentDown) summary.verdict = 'Relegated. The board expected a struggle and keeps faith in you to bounce back.';
     else if (pos <= exp + 3) summary.verdict = 'The board expected more, but your job is safe.';
     else sacked = true;
-    const trophy = (uci >= 0 && G.cups[uci].winner === G.userClub) ? cupName() : (G.cl && G.cl.winner === G.userClub ? clName() : null);
+    const myCC = ccOf(G.userClub);
+    const trophy = (uci >= 0 && G.cups[uci].winner === G.userClub) ? cupName() : (G.cl && G.cl.winner === G.userClub ? clName()
+      : myCC >= 0 && G.ccs[myCC].winner === G.userClub ? G.ccs[myCC].name : null);
     if (sacked && trophy) {
       summary.verdict = `A poor league season, but winning the ${trophy} has saved your job.`;
       sacked = false;
@@ -1744,7 +1871,7 @@
         : `Finished ${ordinal(pos)} in the ${divName(div)} when the board expected ${ordinal(exp)}.`;
     }
     G.history.push({ season: G.season, division: div, position: pos, points: summary.points,
-      champion: summary.champion, cup: summary.cup, cl: summary.cl, move: summary.move });
+      champion: summary.champion, cup: summary.cup, cl: summary.cl || summary.cc, move: summary.move });
     }
     if (G.intl && G.intl.kind) {
       G.intl.history.push({ season: G.season, kind: G.intl.kind, year: G.intl.year,
@@ -1851,6 +1978,8 @@
     if (G.mode === 'national') { pushNews(`📅 ${seasonName()} begins. ${intlOutlook()}`); return; }
     pushNews(`📅 ${seasonName()} begins in the ${divName(userClub().div)}. The board expects a finish around ${ordinal(expectedPosition())}.`);
     if (G.cl && G.cl.clubs.includes(G.userClub)) pushNews(`⭐ You're in the ${clName()} this season (+${money(clMoney().entry)} entry money).`);
+    const myCC = ccOf(G.userClub);
+    if (myCC >= 0) pushNews(`${G.ccs[myCC].icon} You're in the ${G.ccs[myCC].name} this season (+${money(ccMoney().entry)} entry money).`);
   }
 
   // ---------- helpers ----------
@@ -1874,7 +2003,7 @@
   function serialize() { return JSON.stringify(G); }
   function load(json) {
     const data = typeof json === 'string' ? JSON.parse(json) : json;
-    if (!data || ![2, 3, 4, 5, 6, 7, SAVE_VERSION].includes(data.version)) throw new Error('Incompatible save');
+    if (!data || ![2, 3, 4, 5, 6, 7, 8, SAVE_VERSION].includes(data.version)) throw new Error('Incompatible save');
     G = data;
     if (G.version === 2) {
       // v2 saves had no contracts or academy
@@ -1923,6 +2052,17 @@
     if (G.version === 7) {
       // v7 had no Nations League; the international setup carries on as scheduled
       if (G.intl) Object.assign(G.intl, { format: G.intl.kind ? 'tournament' : 'friendlies', koStart: 0, groupWeeks: 3, groupLeague: [], nlMoves: {} });
+      G.version = 8;
+    }
+    if (G.version === 8) {
+      // v8 had no continental cups outside Europe and no legends market
+      G.meta.ccs = G.meta.ccs || []; G.ccs = []; G.ccNext = {}; G.legendsSigned = {};
+      if (G.meta.dataset === 'world') {
+        // older World careers pick up the continental cups their leagues can fill (from next season)
+        const divOf = (country) => G.meta.leagues.findIndex((l) => l.country === country && l.tier === 1) + 1;
+        G.meta.ccs = (ROOT.TM_CONTINENTAL_EXTRA || []).filter((cc) => Object.keys(cc.slots).every((c) => divOf(c) > 0))
+          .map((cc) => ({ key: cc.key, name: cc.name, icon: cc.icon, slots: Object.fromEntries(Object.entries(cc.slots).map(([c, n]) => [divOf(c), n])) }));
+      }
       G.version = SAVE_VERSION;
     }
     return G;
@@ -1941,7 +2081,8 @@
     meta, cupName, divName, divCountry, leagueDivs, zoneInfo, seasonName, promotedCount, cupResult, weekLabel,
     clName, clResult, clStandings, tiePrize, userCupIdx, cupOfCountry, CL_KO_ROUNDS,
     NATION_BASE, INTL_SQUAD, T_KO, STAGE_TEXT, EXPECT_TEXT, nationMeta, nationRanking, eligible, canCallUp, callUpPlayer, dropPlayer,
-    autoSquad, previewNations, nlResultText, intlName, intlStage, intlExpectation, intlOutlook, groupStandings, tournamentRoundName,
+    autoSquad, previewNations, nlResultText, intlName,
+    CC_KO, ccOf, ccResult, legendsMarket, signLegend, intlStage, intlExpectation, intlOutlook, groupStandings, tournamentRoundName,
     ACADEMY_MAX, ACADEMY_GRAD_AGE, RENEW_WINDOW, academyUpgradeCost, academyUpkeep, academyIntake, prospects,
     potentialRange, upgradeAcademy, promoteProspect, releaseProspect,
     contractEnds, canNegotiate, offerContract, expiringPlayers, signingLength,

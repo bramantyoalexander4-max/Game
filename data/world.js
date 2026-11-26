@@ -99,7 +99,7 @@
       { name: 'New England Revolution', short: 'NE', color: '#0A2240', rep: 64, league: 'USA1', players: ['Carles Gil|MF|32|74||ESP'] },
       { name: 'D.C. United', short: 'DC', color: '#1A1A1A', rep: 63, league: 'USA1', players: ['Christian Benteke|FW|34|72||BEL'] },
       { name: 'Chicago Fire', short: 'CHI', color: '#C8102E', rep: 64, league: 'USA1', players: ['Brian Gutiérrez|MF|22|70', 'Hugo Cuypers|FW|28|72||BEL'] },
-      { name: 'FC Dallas', short: 'DAL', color: '#C8102E', rep: 64, league: 'USA1', players: ['Petar Musa|FW|27|73||CRO'] },
+      { name: 'FC Dallas', short: 'DAL', color: '#C8102E', rep: 64, league: 'USA1', players: ['Maarten Paes|GK|27|74||IDN', 'Petar Musa|FW|27|73||CRO'] },
       { name: 'Houston Dynamo', short: 'HOU', color: '#F68712', rep: 64, league: 'USA1', players: ['Jack McGlynn|MF|22|71', 'Ezequiel Ponce|FW|28|71||ARG'] },
       { name: 'Sporting Kansas City', short: 'SKC', color: '#002F65', rep: 63, league: 'USA1', players: ['Dejan Joveljić|FW|26|72||SRB'] },
       { name: 'St. Louis City', short: 'STLC', color: '#DD004A', rep: 63, league: 'USA1', players: ['Roman Bürki|GK|34|73||SUI'] },
@@ -280,4 +280,36 @@
       { name: 'Winterthur', short: 'WIN', color: '#C8102E', rep: 59, league: 'SUI1', players: [] },
     ],
   };
+  C.indonesia = {
+    country: 'Indonesia',
+    leagues: [{ key: 'IDN1', name: 'Super League', tier: 1, cycles: 2 }],
+    promotions: [],
+    cup: 'Piala Indonesia',
+    clSlots: { IDN1: 0 },
+    clubs: [
+      { name: 'Persib Bandung', short: 'PSB', color: '#0057A6', rep: 62, league: 'IDN1', players: ['Thom Haye|MF|30|72', 'Eliano Reijnders|DF|24|70', 'Marc Klok|MF|32|68', 'Beckham Putra|MF|24|66', 'David da Silva|FW|35|67||BRA', 'Ciro Alves|FW|35|66||BRA'] },
+      { name: 'Persija Jakarta', short: 'PSJ', color: '#E37222', rep: 60, league: 'IDN1', players: ['Rizky Ridho|DF|23|68'] },
+      { name: 'Dewa United', short: 'DEW', color: '#1A1A1A', rep: 59, league: 'IDN1', players: ['Egy Maulana Vikri|FW|24|66'] },
+      { name: 'Malut United', short: 'MAL', color: '#C8102E', rep: 58, league: 'IDN1', players: [] },
+      { name: 'Persebaya Surabaya', short: 'PSBY', color: '#00843D', rep: 58, league: 'IDN1', players: [] },
+      { name: 'Borneo FC', short: 'BOR', color: '#E37222', rep: 58, league: 'IDN1', players: [] },
+      { name: 'Bali United', short: 'BAL', color: '#C8102E', rep: 58, league: 'IDN1', players: [] },
+      { name: 'PSM Makassar', short: 'PSM', color: '#C8102E', rep: 57, league: 'IDN1', players: [] },
+      { name: 'Persita Tangerang', short: 'PST', color: '#5A2D82', rep: 56, league: 'IDN1', players: [] },
+      { name: 'Arema FC', short: 'ARE', color: '#0057A6', rep: 56, league: 'IDN1', players: [] },
+      { name: 'Madura United', short: 'MDU', color: '#C8102E', rep: 55, league: 'IDN1', players: [] },
+      { name: 'PSBS Biak', short: 'BIA', color: '#0057A6', rep: 54, league: 'IDN1', players: [] },
+      { name: 'Persik Kediri', short: 'PSK', color: '#5A2D82', rep: 55, league: 'IDN1', players: [] },
+      { name: 'Semen Padang', short: 'SMP', color: '#C8102E', rep: 54, league: 'IDN1', players: [] },
+      { name: 'Persis Solo', short: 'PSS', color: '#C8102E', rep: 55, league: 'IDN1', players: [] },
+      { name: 'PSIM Yogyakarta', short: 'PSIM', color: '#0057A6', rep: 54, league: 'IDN1', players: [] },
+      { name: 'Bhayangkara FC', short: 'BHY', color: '#C8102E', rep: 55, league: 'IDN1', players: [] },
+      { name: 'Persijap Jepara', short: 'PJP', color: '#C8102E', rep: 53, league: 'IDN1', players: [] },
+    ],
+  };
+  // continental club competitions outside Europe (16 clubs: four groups of four, then quarter-finals)
+  root.TM_CONTINENTAL_EXTRA = [
+    { key: 'LIB', name: 'Copa Libertadores', icon: '🏆', slots: { Brazil: 8, Argentina: 8 } },
+    { key: 'ACL', name: 'AFC Champions League', icon: '🌏', slots: { 'Saudi Arabia': 4, Japan: 4, 'South Korea': 4, Indonesia: 4 } },
+  ];
 })(typeof window !== 'undefined' ? window : globalThis);
