@@ -39,6 +39,14 @@
     toast.t = setTimeout(() => t.classList.add('hidden'), 2600);
   }
   function openModal(html) { modalBox.innerHTML = html; modal.classList.remove('hidden'); }
+  // in-page confirm dialog (window.confirm is blocked in sandboxed viewers)
+  let pendingConfirm = null;
+  function ask(text, yesLabel, onYes, noLabel = 'Cancel', onNo = null) {
+    pendingConfirm = { onYes, onNo };
+    openModal(`<p style="margin-top:0">${esc(text)}</p>
+      <div class="btns"><button class="btn" data-a="ask-no">${esc(noLabel)}</button>
+      <button class="btn primary" data-a="ask-yes">${esc(yesLabel)}</button></div>`);
+  }
   function closeModal() { modal.classList.add('hidden'); modalBox.innerHTML = ''; }
   modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
 
@@ -463,10 +471,14 @@
       case 'continue':
         try { E.load(localStorage.getItem(SAVE_KEY)); render(); } catch (err) { toast('Save could not be loaded.'); renderStart(true); }
         break;
-      case 'new-career':
-        if (G() && !G().gameOver && !confirm('Abandon your current career?')) return;
-        try { localStorage.removeItem(SAVE_KEY); } catch (err) { /* ignore */ }
-        closeModal(); renderStart(true); break;
+      case 'new-career': {
+        const reset = () => { try { localStorage.removeItem(SAVE_KEY); } catch (err) { /* ignore */ } closeModal(); renderStart(true); };
+        if (G() && !G().gameOver) ask('Abandon your current career? Your save will be deleted.', 'Abandon', reset);
+        else reset();
+        break;
+      }
+      case 'ask-yes': { const c = pendingConfirm; pendingConfirm = null; closeModal(); if (c && c.onYes) c.onYes(); break; }
+      case 'ask-no': { const c = pendingConfirm; pendingConfirm = null; closeModal(); if (c && c.onNo) c.onNo(); break; }
       case 'pick-club': {
         const name = (document.getElementById('mname').value || 'Manager').trim().slice(0, 24) || 'Manager';
         E.newGame(+d.i, name);
@@ -503,16 +515,16 @@
         const r = E.getOffer(+d.id);
         if (!r.ok) { toast(r.why); break; }
         const p = E.player(+d.id);
-        if (confirm(`${E.club(r.club).name} offer ${M(r.amount)} for ${p.name} (value ${M(E.playerValue(p))}). Accept?`)) {
-          E.sell(+d.id, r); save(); closeModal(); render(); toast('Player sold.');
-        } else toast('Offer rejected.');
+        ask(`${E.club(r.club).name} offer ${M(r.amount)} for ${p.name} (value ${M(E.playerValue(p))}). Accept?`, 'Accept',
+          () => { E.sell(+d.id, r); save(); render(); toast('Player sold.'); }, 'Reject', () => toast('Offer rejected.'));
         break;
       }
       case 'release': {
         const p = E.player(+d.id);
-        if (!confirm(`Release ${p.name}? It costs ${M(E.releaseCost(p.id))} to settle the contract.`)) break;
-        const r = E.release(+d.id);
-        if (!r.ok) toast(r.why); else { save(); closeModal(); render(); }
+        ask(`Release ${p.name}? It costs ${M(E.releaseCost(p.id))} to settle the contract.`, 'Release', () => {
+          const r = E.release(p.id);
+          if (!r.ok) toast(r.why); else { save(); render(); }
+        });
         break;
       }
       case 'training': G().training = d.k; render(); break;
