@@ -2,7 +2,7 @@
 (function (root) {
   'use strict';
 
-  const SAVE_VERSION = 2;
+  const SAVE_VERSION = 3;
   let G = null; // current game state
 
   // ---------- random ----------
@@ -94,6 +94,10 @@
   const CUP_AFTER = [3, 8, 13, 17, 22]; // each cup round is played after this many league matchdays
   const CUP_PRIZE = [150000, 300000, 600000, 1200000, 3000000]; // for winning a tie in that round
   const CUP_BYES = 8; // strongest top-flight clubs skip the first round
+  const MAX_CONTRACT = 5; // seasons
+  const RENEW_WINDOW = 2; // players discuss new terms in the last N seasons of their deal
+  const ACADEMY_MAX = 5;
+  const ACADEMY_GRAD_AGE = 19; // prospects this old must be promoted or they leave
 
   // ---------- players ----------
   function makeName() {
@@ -120,14 +124,19 @@
       id: G.nextPid++, name: makeName(), pos, age, ovr, pot,
       fitness: 100, morale: 70, injury: 0,
       apps: 0, goals: 0, assists: 0, yellow: 0,
-      club: null, wage: 0,
+      club: null, wage: 0, contract: 0,
     };
     p.wage = wageFor(p);
     return p;
   }
+  function defaultContract(p) {
+    // seasons remaining, counting the current one
+    return p.age >= 32 ? ri(1, 2) : p.age >= 29 ? ri(1, 3) : ri(1, 5);
+  }
   function addPlayer(p, clubId) {
     G.players[p.id] = p;
     p.club = clubId;
+    p.contract = clubId === null ? 0 : defaultContract(p);
     if (clubId !== null) club(clubId).squad.push(p.id);
     else G.freeAgents.push(p.id);
     return p;
@@ -171,6 +180,8 @@
     for (let i = 0; i < 24; i++) {
       addPlayer(genPlayer(pick(['GK', 'DF', 'DF', 'MF', 'MF', 'FW']), ri(55, 70), 19, 33), null);
     }
+    G.academy = { level: clamp(Math.round((userClub().rep - 45) / 10), 1, 4), prospects: [] };
+    for (let i = 0; i < 3; i++) newProspect(ri(15, 17));
     scheduleSeason();
     pushNews(`Welcome, ${G.manager}! The board of ${userClub().name} expects a finish around ${ordinal(expectedPosition())} in Division ${userClub().div}.`);
     return G;
@@ -566,6 +577,11 @@
     const intensity = INTENSITY[G.training];
     Object.values(G.players).forEach((p) => {
       if (p.club === null) return;
+      if (p.academy) {
+        // academy coaching: quality of facilities drives development
+        if (p.ovr < p.pot && rand() < 0.035 * (1 + 0.2 * G.academy.level) * (p.pot - p.ovr) / 10) p.ovr++;
+        return;
+      }
       if (p.injury > 0) { p.injury--; if (p.injury === 0 && p.club === G.userClub) pushNews(`✅ ${p.name} is back from injury.`); }
       p.fitness = clamp(p.fitness + intensity.recover, 0, 100);
       // development during the season
@@ -588,6 +604,14 @@
       c.budget += weeklyIncome(c) - wages;
       c.lastWages = wages;
     });
+    userClub().budget -= academyUpkeep();
+    // reminders about expiring deals and academy graduates
+    if (G.week === 9 || G.week === 19) {
+      const exp = expiringPlayers();
+      if (exp.length) pushNews(`📝 ${exp.length} player(s) are in the final year of their contract: ${exp.slice(0, 4).map((p) => p.name).join(', ')}${exp.length > 4 ? '…' : ''}. They leave for free at season end.`);
+      const grads = prospects().filter((p) => p.age >= ACADEMY_GRAD_AGE - 1);
+      if (grads.length) pushNews(`🎓 Decide on ${grads.map((p) => p.name).join(', ')}: academy players turning ${ACADEMY_GRAD_AGE} leave unless promoted.`);
+    }
     aiTransferActivity();
     G.clubs.forEach((c) => { if (c.id !== G.userClub) { c.lineup = autoLineup(c.id); aiMentality(c); } });
     validateLineup(G.userClub);
@@ -629,12 +653,110 @@
     return G.clubs.filter((c) => c.div === div).sort((a, b) => b.rep - a.rep).findIndex((c) => c.id === cid) + 1;
   }
 
+  // ---------- youth academy ----------
+  const academyUpgradeCost = () => (G.academy.level >= ACADEMY_MAX ? null : 1.5e6 * G.academy.level);
+  const academyUpkeep = () => 6000 + G.academy.level * 9000; // per week, covers youth coaches & wages
+  const academyIntake = () => 2 + Math.ceil(G.academy.level / 2);
+  const scoutError = () => ACADEMY_MAX - G.academy.level; // +/- on the potential estimate
+  const prospects = () => G.academy.prospects.map(player);
+  function newProspect(age = ri(15, 16)) {
+    const lvl = G.academy.level;
+    const p = genPlayer(pick(['GK', 'DF', 'DF', 'MF', 'MF', 'FW', 'FW']), userClub().rep - 12 + lvl * 1.5, age, age);
+    p.pot = clamp(p.ovr + ri(8, 22) + lvl * 2, p.ovr, 96);
+    p.potNoise = ri(-4, 4); // what the scouts get wrong; shrinks as the academy improves
+    p.academy = true;
+    p.club = G.userClub;
+    p.wage = 0;
+    G.players[p.id] = p;
+    G.academy.prospects.push(p.id);
+    return p;
+  }
+  function potentialRange(p) {
+    if (!p.academy) return [p.pot, p.pot];
+    const err = scoutError();
+    const est = clamp(Math.round(p.pot + p.potNoise * err / 4), p.ovr, 99);
+    return [Math.max(p.ovr, est - err), Math.min(99, est + err)];
+  }
+  function upgradeAcademy() {
+    const cost = academyUpgradeCost();
+    if (cost === null) return { ok: false, why: 'The academy is already world class.' };
+    if (userClub().budget < cost) return { ok: false, why: `Upgrading costs ${money(cost)}.` };
+    userClub().budget -= cost;
+    G.academy.level++;
+    pushNews(`🏗️ Youth academy upgraded to level ${G.academy.level}.`);
+    return { ok: true };
+  }
+  function promoteProspect(pid) {
+    const p = player(pid);
+    if (!p || !p.academy) return { ok: false, why: 'Not an academy player.' };
+    if (userClub().squad.length >= MAX_SQUAD) return { ok: false, why: `Squad is full (${MAX_SQUAD}).` };
+    p.academy = false;
+    delete p.potNoise;
+    G.academy.prospects = G.academy.prospects.filter((id) => id !== pid);
+    userClub().squad.push(pid);
+    p.contract = 3;
+    p.wage = Math.max(1000, Math.round(wageFor(p) * 0.7 / 100) * 100);
+    p.morale = 85;
+    pushNews(`🎓 ${p.name} promoted from the academy on a 3-season deal.`);
+    return { ok: true };
+  }
+  function releaseProspect(pid) {
+    const p = player(pid);
+    if (!p || !p.academy) return { ok: false, why: 'Not an academy player.' };
+    G.academy.prospects = G.academy.prospects.filter((id) => id !== pid);
+    delete G.players[pid];
+    return { ok: true };
+  }
+
+  // ---------- contracts ----------
+  const contractEnds = (p) => G.season + p.contract - 1; // last season of the deal
+  function renewalOptions(p) {
+    // extension lengths, in extra seasons
+    const max = p.age >= 33 ? 1 : p.age >= 30 ? 2 : MAX_CONTRACT - 1;
+    return Array.from({ length: max }, (_, i) => i + 1);
+  }
+  function contractDemand(p) {
+    let w = Math.max(p.wage, wageFor(p)) * 1.08;
+    if (p.ovr > userClub().rep) w *= 1 + (p.ovr - userClub().rep) * 0.03; // stars know their worth
+    if (p.morale < 40) w *= 1.15;
+    if (p.age <= 23 && p.pot - p.ovr >= 8) w *= 1.1;
+    return Math.round(w / 100) * 100;
+  }
+  function canNegotiate(p) {
+    if (!p || p.club !== G.userClub || p.academy) return { ok: false, why: 'Not your player.' };
+    if (p.contract > RENEW_WINDOW) return { ok: false, why: `${p.name} is happy with his current deal (runs until season ${contractEnds(p)}).` };
+    if (p.negBlock && p.negBlock.season === G.season && p.negBlock.week > G.week) {
+      return { ok: false, why: `${p.name} won't reopen talks until week ${p.negBlock.week + 1}.` };
+    }
+    return { ok: true, demand: contractDemand(p), options: renewalOptions(p) };
+  }
+  function offerContract(pid, years, wage) {
+    const p = player(pid);
+    const chk = canNegotiate(p);
+    if (!chk.ok) return chk;
+    if (!chk.options.includes(years)) return { ok: false, why: 'He won\'t sign for that length.' };
+    const ratio = wage / chk.demand;
+    const chance = ratio >= 1 ? 1 : ratio >= 0.9 ? clamp(0.35 + (p.morale - 50) / 150, 0.1, 0.75) : 0.05;
+    if (rand() < chance) {
+      p.contract += years;
+      p.wage = wage;
+      p.morale = clamp(p.morale + (ratio > 1.05 ? 12 : 5), 0, 100);
+      pushNews(`📝 ${p.name} signs a new deal until season ${contractEnds(p)} (${money(wage)}/wk).`);
+      return { ok: true };
+    }
+    p.negBlock = { season: G.season, week: G.week + 3 };
+    p.morale = clamp(p.morale - 6, 0, 100);
+    return { ok: false, rejected: true, why: `${p.name} rejected the offer. He won't talk again for 3 weeks.` };
+  }
+  function expiringPlayers() { return squadOf(G.userClub).filter((p) => p.contract <= 1); }
+
   // ---------- transfers ----------
   function askingPrice(p) {
     if (p.club === null) return 0;
     const c = club(p.club);
     const starter = c.lineup.some((l) => l.pid === p.id);
-    return Math.round(playerValue(p) * (starter ? 1.35 : 1.1) / 10000) * 10000;
+    const expiring = p.contract <= 1 ? 0.55 : 1; // sell now or lose him for nothing
+    return Math.round(playerValue(p) * (starter ? 1.35 : 1.1) * expiring / 10000) * 10000;
   }
   function signingWage(p) {
     return Math.round(Math.max(p.wage, wageFor(p)) * (p.club === null ? 1.15 : 1.05) / 100) * 100;
@@ -647,8 +769,9 @@
     if (p.ovr > u.rep + 12) return { ok: false, why: `${p.name} isn't interested in joining a club of your stature.` };
     const fee = askingPrice(p);
     if (fee > u.budget) return { ok: false, why: 'Not enough budget for the fee.' };
-    return { ok: true, fee, wage: signingWage(p) };
+    return { ok: true, fee, wage: signingWage(p), contract: signingLength(p) };
   }
+  const signingLength = (p) => (p.age >= 32 ? 1 : p.age >= 29 ? 2 : 4);
   function buy(pid) {
     const chk = canBuy(pid);
     if (!chk.ok) return chk;
@@ -656,10 +779,12 @@
     const from = p.club;
     moveTo(p, G.userClub);
     p.wage = chk.wage;
+    p.contract = chk.contract;
+    delete p.negBlock;
     u.budget -= chk.fee;
     if (from !== null) club(from).budget += chk.fee;
     p.morale = 80;
-    pushNews(`✍️ Signed ${p.name} (${p.pos}, ${p.ovr}) ${from !== null ? 'from ' + club(from).name + ' for ' + money(chk.fee) : 'on a free transfer'}.`);
+    pushNews(`✍️ Signed ${p.name} (${p.pos}, ${p.ovr}) ${from !== null ? 'from ' + club(from).name + ' for ' + money(chk.fee) : 'on a free transfer'}, contract until season ${contractEnds(p)}.`);
     return { ok: true };
   }
   function moveTo(p, cid) {
@@ -670,6 +795,8 @@
     } else G.freeAgents = G.freeAgents.filter((id) => id !== p.id);
     p.club = cid;
     if (cid !== null) club(cid).squad.push(p.id); else G.freeAgents.push(p.id);
+    if (cid === null) p.contract = 0;
+    else if (cid !== G.userClub) p.contract = Math.max(p.contract, ri(2, 4));
   }
   function getOffer(pid) {
     const p = player(pid);
@@ -691,8 +818,10 @@
     validateLineup(G.userClub);
   }
   function releaseCost(pid) {
-    const remaining = Math.max(1, totalWeeks() - G.week);
-    return Math.round(player(pid).wage * remaining * 0.5);
+    // pay off half of what is left on the contract
+    const p = player(pid);
+    const remaining = Math.max(1, totalWeeks() - G.week) + Math.max(0, p.contract - 1) * totalWeeks();
+    return Math.round(p.wage * remaining * 0.5);
   }
   function release(pid) {
     if (userClub().squad.length <= MIN_SQUAD) return { ok: false, why: `You need at least ${MIN_SQUAD} players.` };
@@ -726,6 +855,7 @@
     buyer.budget -= fee;
     if (from !== null) club(from).budget += fee;
     p.wage = signingWage(p);
+    p.contract = signingLength(p);
     pushNews(`🔄 ${buyer.name} sign ${p.name} (${p.pos}, ${p.ovr})${from !== null ? ' from ' + club(from).name + ' for ' + money(fee) : ' on a free'}.`);
   }
 
@@ -746,7 +876,7 @@
       promoted: promoted.map((c) => c.name), relegated: relegated.map((c) => c.name),
       cupWinner: G.cup.winner !== null ? club(G.cup.winner).name : '-', cup: cupResult(G.userClub),
       topScorer: topScorer ? `${topScorer.name} (${club(topScorer.club).short}) — ${topScorer.goals}` : '-',
-      retired: [], youth: [], verdict: '', move: null,
+      retired: [], youth: [], departed: [], graduatesLeft: [], verdict: '', move: null,
     };
     [[1, t1], [2, t2]].forEach(([d, table]) => {
       const byRep = [...table].sort((a, b) => b.rep - a.rep);
@@ -803,14 +933,37 @@
         delete G.players[p.id];
       }
     });
-    // youth intake & AI squad top-ups
-    G.clubs.forEach((c) => {
-      for (let i = 0; i < 3; i++) {
-        const y = addPlayer(genPlayer(pick(['GK', 'DF', 'MF', 'MF', 'FW', 'DF']), c.rep - 2 + ri(-3, 6), 16, 17), c.id);
-        y.pot = clamp(y.pot + ri(0, 8), y.ovr, 96);
-        if (c.id === G.userClub) summary.youth.push(`${y.name} (${y.pos}, ${y.ovr} → pot ${y.pot})`);
+    // contracts: AI clubs keep most of their players; everyone else whose deal is up walks away
+    Object.values(G.players).forEach((p) => {
+      if (p.club === null || p.academy) return;
+      if (p.contract <= 1 && p.club !== G.userClub) {
+        const keep = p.age <= 29 ? 0.8 : p.age <= 32 ? 0.55 : 0.3;
+        if (rand() < keep) { p.contract = defaultContract(p) + 1; p.wage = Math.max(p.wage, wageFor(p)); }
       }
+      p.contract--;
+      if (p.contract <= 0) {
+        if (p.club === G.userClub) summary.departed.push(`${p.name} (${p.pos}, ${p.ovr})`);
+        moveTo(p, null);
+      }
+    });
+    // academy: graduates who weren't promoted leave, then the new intake arrives
+    prospects().filter((p) => p.age >= ACADEMY_GRAD_AGE).forEach((p) => {
+      summary.graduatesLeft.push(`${p.name} (${p.pos}, ${p.ovr})`);
+      releaseProspect(p.id);
+    });
+    for (let i = 0; i < academyIntake(); i++) {
+      const y = newProspect();
+      const [lo, hi] = potentialRange(y);
+      summary.youth.push(`${y.name} (${y.pos}, ${y.ovr}, pot ${lo === hi ? lo : lo + '–' + hi})`);
+    }
+    // AI youth intake & squad top-ups
+    G.clubs.forEach((c) => {
       if (c.id !== G.userClub) {
+        for (let i = 0; i < 3; i++) {
+          const y = addPlayer(genPlayer(pick(['GK', 'DF', 'MF', 'MF', 'FW', 'DF']), c.rep - 2 + ri(-3, 6), 16, 17), c.id);
+          y.pot = clamp(y.pot + ri(0, 8), y.ovr, 96);
+          y.contract = 3;
+        }
         for (const pos of Object.keys(SQUAD_TEMPLATE)) {
           while (squadOf(c.id).filter((p) => p.pos === pos).length < SQUAD_TEMPLATE[pos]) {
             addPlayer(genPlayer(pos, c.rep - 5, 20, 30), c.id);
@@ -824,6 +977,13 @@
       }
       c.table = blankTable();
     });
+    while (userClub().squad.length < MIN_SQUAD) {
+      const pos = Object.keys(SQUAD_TEMPLATE).sort((a, b) => squadOf(G.userClub).filter((p) => p.pos === a).length / SQUAD_TEMPLATE[a]
+        - squadOf(G.userClub).filter((p) => p.pos === b).length / SQUAD_TEMPLATE[b])[0];
+      const p = addPlayer(genPlayer(pos, userClub().rep - 10, 20, 30), G.userClub);
+      p.contract = 1;
+      pushNews(`🆘 The board signed ${p.name} (${p.pos}, ${p.ovr}) on a 1-season deal to fill the squad.`);
+    }
     // refresh free agent pool
     while (G.freeAgents.length < 20) addPlayer(genPlayer(pick(['GK', 'DF', 'MF', 'FW']), ri(55, 72), 19, 32), null);
     if (G.freeAgents.length > 40) G.freeAgents.splice(0, G.freeAgents.length - 40).forEach((id) => delete G.players[id]);
@@ -862,8 +1022,15 @@
   function serialize() { return JSON.stringify(G); }
   function load(json) {
     const data = typeof json === 'string' ? JSON.parse(json) : json;
-    if (!data || data.version !== SAVE_VERSION) throw new Error('Incompatible save');
+    if (!data || (data.version !== SAVE_VERSION && data.version !== 2)) throw new Error('Incompatible save');
     G = data;
+    if (G.version === 2) {
+      // v2 saves had no contracts or academy
+      Object.values(G.players).forEach((p) => { p.contract = p.club === null ? 0 : defaultContract(p); });
+      G.academy = { level: clamp(Math.round((userClub().rep - 45) / 10), 1, 4), prospects: [] };
+      for (let i = 0; i < 3; i++) newProspect(ri(15, 17));
+      G.version = SAVE_VERSION;
+    }
     return G;
   }
 
@@ -878,5 +1045,8 @@
     playerValue, askingPrice, signingWage, canBuy, buy, getOffer, sell, release, releaseCost,
     money, ordinal, pushNews, gateIncome, weeklyIncome, wageBill,
     CUP_NAME, CUP_ROUNDS, CUP_PRIZE, PROMOTED, cupResult, weekLabel,
+    ACADEMY_MAX, ACADEMY_GRAD_AGE, RENEW_WINDOW, academyUpgradeCost, academyUpkeep, academyIntake, prospects,
+    potentialRange, upgradeAcademy, promoteProspect, releaseProspect,
+    contractEnds, canNegotiate, offerContract, expiringPlayers, signingLength,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

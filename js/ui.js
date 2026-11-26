@@ -9,7 +9,7 @@
 
   const ui = {
     tab: 'home',
-    squadSort: 'pos',
+    squadSort: 'pos', squadView: 'team', neg: null,
     tacticSel: null, // index into lineup, or 'b:<pid>' for a bench player
     marketPos: 'ALL', marketMax: 0, marketQuery: '',
     leagueView: 'table', resultsWeek: null, leagueDiv: null,
@@ -168,14 +168,93 @@
       <div class="grow"><div class="name">${esc(p.name)}</div>
         <div class="small muted">${p.age}y · pot ${p.pot} · ${M(E.playerValue(p))}${extra}</div></div>
       ${p.injury ? `<span class="tag inj">INJ ${p.injury}w</span>` : inXI ? '<span class="tag xi">XI</span>' : ''}
+      ${p.club !== null && p.contract <= 1 ? '<span class="tag exp">EXP</span>' : ''}
       ${bar(p.fitness)}</div>`;
   }
   function viewSquad() {
+    const views = [['team', 'First team'], ['contracts', 'Contracts'], ['academy', 'Academy']];
+    const nav = `<div class="btns" style="margin-bottom:6px">${views.map(([k, l]) => `<button class="btn ${ui.squadView === k ? 'on' : ''}" data-a="squad-view" data-v="${k}">${l}</button>`).join('')}</div>`;
+    if (ui.squadView === 'contracts') return nav + viewContracts();
+    if (ui.squadView === 'academy') return nav + viewAcademy();
     const s = sortedSquad();
     const sorts = [['pos', 'Position'], ['ovr', 'Rating'], ['age', 'Age'], ['value', 'Value'], ['goals', 'Goals']];
-    return `<div class="row between"><h2>Squad (${s.length})</h2><span class="small muted">Wages ${M(E.wageBill(G().userClub))}/wk</span></div>
+    return nav + `<div class="row between"><h2>Squad (${s.length})</h2><span class="small muted">Wages ${M(E.wageBill(G().userClub))}/wk</span></div>
       <div class="chips">${sorts.map(([k, l]) => `<button class="btn ${ui.squadSort === k ? 'on' : ''}" data-a="squad-sort" data-k="${k}">${l}</button>`).join('')}</div>
       <div class="list">${s.map((p) => playerRow(p, ui.squadSort === 'goals' ? ` · ⚽${p.goals} 🅰${p.assists}` : '')).join('')}</div>`;
+  }
+  function contractText(p) {
+    if (p.club === null) return 'None (free agent)';
+    const end = E.contractEnds(p);
+    return p.contract <= 1 ? `Expires this season (S${end})` : `Until end of season ${end} (${p.contract} seasons)`;
+  }
+  function viewContracts() {
+    const s = E.squadOf(G().userClub).sort((a, b) => a.contract - b.contract || b.wage - a.wage);
+    const exp = s.filter((p) => p.contract <= 1).length;
+    return `<div class="card"><div class="kv" style="margin:0">
+        <span>Wage bill</span><span>${M(E.wageBill(G().userClub))}/wk</span>
+        <span>Expiring this season</span><span style="color:${exp ? 'var(--warn)' : 'inherit'}">${exp} player(s)</span></div>
+      <p class="small muted" style="margin:8px 0 0">Players discuss new terms in the last ${E.RENEW_WINDOW} seasons of their deal.
+        Anyone whose contract runs out leaves for free at the end of the season. Rival clubs sell players in their final year cheaply.</p></div>
+      <div class="list">${s.map((p) => `<div class="item tap" data-a="player" data-id="${p.id}">
+        ${posTag(p.pos)}<div class="ovr">${p.ovr}</div>
+        <div class="grow"><div class="name">${esc(p.name)}</div><div class="small muted">${p.age}y · ${M(p.wage)}/wk · until S${E.contractEnds(p)}</div></div>
+        ${p.contract <= 1 ? '<span class="tag exp">EXPIRING</span>' : p.contract <= E.RENEW_WINDOW ? '<span class="tag">Can renew</span>' : ''}</div>`).join('')}</div>`;
+  }
+  function viewAcademy() {
+    const a = G().academy;
+    const cost = E.academyUpgradeCost();
+    const ps = E.prospects().sort((x, y) => y.ovr - x.ovr);
+    const err = E.ACADEMY_MAX - a.level;
+    return `<div class="card">
+        <div class="row between"><b>Youth academy</b><span class="stars">${'★'.repeat(a.level)}${'☆'.repeat(E.ACADEMY_MAX - a.level)}</span></div>
+        <div class="kv">
+          <span>Running costs</span><span>${M(E.academyUpkeep())}/wk</span>
+          <span>Intake each summer</span><span>${E.academyIntake()} prospects</span>
+          <span>Scouting accuracy</span><span>${err ? `potential ±${err}` : 'exact'}</span></div>
+        <p class="small muted" style="margin:0 0 10px">Better facilities bring in more talented prospects, develop them faster and estimate their potential more accurately.
+          Prospects don't play; promote them to the first team when they're ready. At ${E.ACADEMY_GRAD_AGE} they leave unless promoted.</p>
+        ${cost === null ? '<p class="small" style="color:var(--accent)">The academy is at the maximum level.</p>'
+          : `<button class="btn block" data-a="academy-upgrade">🏗️ Upgrade to level ${a.level + 1} · ${M(cost)}</button>`}
+      </div>
+      <h2>Prospects (${ps.length})</h2>
+      <div class="list">${ps.map((p) => { const [lo, hi] = E.potentialRange(p); return `<div class="item tap" data-a="prospect" data-id="${p.id}">
+        ${posTag(p.pos)}<div class="ovr">${p.ovr}</div>
+        <div class="grow"><div class="name">${esc(p.name)}</div><div class="small muted">${p.age}y · potential ${lo === hi ? lo : lo + '–' + hi}</div></div>
+        ${p.age >= E.ACADEMY_GRAD_AGE - 1 ? '<span class="tag exp">FINAL YEAR</span>' : ''}</div>`; }).join('') || '<div class="news muted">No prospects. A new intake arrives each summer.</div>'}</div>`;
+  }
+  function prospectModal(pid) {
+    const p = E.player(pid);
+    if (!p) return;
+    const [lo, hi] = E.potentialRange(p);
+    openModal(`<div class="row">${posTag(p.pos)}<div class="ovr" style="font-size:26px;width:auto">${p.ovr}</div>
+        <div class="grow"><b style="font-size:18px">${esc(p.name)}</b><div class="small muted">Academy prospect</div></div></div>
+      <div class="kv"><span>Age</span><span>${p.age}</span>
+        <span>Potential (scouted)</span><span>${lo === hi ? lo : lo + '–' + hi}</span>
+        <span>If promoted</span><span>3-season deal</span></div>
+      ${p.age >= E.ACADEMY_GRAD_AGE - 1 ? `<p class="small" style="color:var(--warn)">Turns ${E.ACADEMY_GRAD_AGE} next summer: promote him or he leaves.</p>` : ''}
+      <div class="btns"><button class="btn primary" data-a="promote" data-id="${p.id}">🎓 Promote to first team</button>
+        <button class="btn danger" data-a="release-prospect" data-id="${p.id}">Release</button></div>
+      <button class="btn block" style="margin-top:8px" data-a="close">Close</button>`);
+  }
+  function negotiationModal() {
+    const n = ui.neg, p = E.player(n.pid);
+    const chk = E.canNegotiate(p);
+    if (!chk.ok) { closeModal(); toast(chk.why); return; }
+    const wages = { low: Math.round(chk.demand * 0.9 / 100) * 100, demand: chk.demand, high: Math.round(chk.demand * 1.1 / 100) * 100 };
+    if (!chk.options.includes(n.years)) n.years = chk.options[chk.options.length - 1];
+    const labels = { low: 'Lowball (−10%)', demand: 'Meet demand', high: 'Generous (+10%)' };
+    const hint = { low: 'He may walk away from talks.', demand: 'He will accept.', high: 'He will accept and his morale gets a boost.' };
+    openModal(`<b style="font-size:18px">New contract: ${esc(p.name)}</b>
+      <div class="kv"><span>Current deal</span><span>${M(p.wage)}/wk · until S${E.contractEnds(p)}</span>
+        <span>His demand</span><span style="color:var(--accent2)">${M(chk.demand)}/wk</span></div>
+      <b class="small muted">Extend by</b>
+      <div class="chips" style="margin-top:6px">${chk.options.map((y) => `<button class="btn ${n.years === y ? 'on' : ''}" data-a="neg-years" data-y="${y}">+${y} (to S${E.contractEnds(p) + y})</button>`).join('')}</div>
+      ${p.age >= 30 ? '<p class="small muted" style="margin:0">Older players are only offered short extensions.</p>' : ''}
+      <b class="small muted">Weekly wage</b>
+      <div class="list" style="margin-top:6px">${Object.keys(wages).map((k) => `<div class="item tap ${n.wage === k ? 'sel' : ''}" data-a="neg-wage" data-k="${k}">
+        <div class="grow"><b>${labels[k]}</b><div class="small muted">${hint[k]}</div></div><b>${M(wages[k])}</b></div>`).join('')}</div>
+      <div class="btns"><button class="btn" data-a="close">Cancel</button>
+        <button class="btn primary" data-a="neg-offer" data-w="${wages[n.wage]}">Offer contract</button></div>`);
   }
   function playerModal(pid) {
     const p = E.player(pid);
@@ -184,12 +263,13 @@
     const c = p.club !== null ? E.club(p.club) : null;
     let actions = '';
     if (mine) {
-      actions = `<div class="btns"><button class="btn" data-a="sell" data-id="${p.id}">💰 Find buyer</button>
+      actions = `${p.contract <= E.RENEW_WINDOW ? `<button class="btn primary block" style="margin-bottom:8px" data-a="renew" data-id="${p.id}">📝 Offer new contract</button>` : ''}
+        <div class="btns"><button class="btn" data-a="sell" data-id="${p.id}">💰 Find buyer</button>
         <button class="btn danger" data-a="release" data-id="${p.id}">Release (${M(E.releaseCost(p.id))})</button></div>`;
     } else if (!G().gameOver) {
       const chk = E.canBuy(p.id);
       actions = chk.ok
-        ? `<button class="btn primary block" data-a="buy" data-id="${p.id}">${chk.fee ? 'Buy for ' + M(chk.fee) : 'Sign free agent'} · ${M(chk.wage)}/wk</button>`
+        ? `<button class="btn primary block" data-a="buy" data-id="${p.id}">${chk.fee ? 'Buy for ' + M(chk.fee) : 'Sign free agent'} · ${M(chk.wage)}/wk · ${chk.contract}-season deal</button>`
         : `<p class="small" style="color:var(--warn)">${esc(chk.why)}</p>`;
     }
     openModal(`<div class="row">${posTag(p.pos)}<div class="ovr" style="font-size:26px;width:auto">${p.ovr}</div>
@@ -200,6 +280,7 @@
         <span>Value</span><span>${M(E.playerValue(p))}</span>
         ${!mine && p.club !== null ? `<span>Asking price</span><span>${M(E.askingPrice(p))}</span>` : ''}
         <span>Wage</span><span>${M(p.wage)}/wk</span>
+        <span>Contract</span><span style="${p.club !== null && p.contract <= 1 ? 'color:var(--warn)' : ''}">${contractText(p)}</span>
         <span>Fitness</span><span>${Math.round(p.fitness)}%</span>
         <span>Morale</span><span>${p.morale > 75 ? '😀' : p.morale > 50 ? '🙂' : p.morale > 30 ? '😐' : '😠'} ${p.morale}</span>
         <span>Status</span><span>${p.injury ? `Injured (${p.injury} wk)` : 'Available'}</span>
@@ -370,6 +451,7 @@
         <span>Budget</span><span style="color:${c.budget < 0 ? 'var(--bad)' : 'var(--accent2)'}">${M(c.budget)}</span>
         <span>Weekly wages</span><span>-${M(wages)}</span>
         <span>TV & commercial</span><span>+${M(income)}/wk</span>
+        <span>Youth academy (level ${g.academy.level})</span><span>-${M(E.academyUpkeep())}/wk</span>
         <span>Home gate (avg)</span><span>+${M(E.gateIncome(c))}/match</span>
         <span>Reputation</span><span class="stars">${stars(c.rep)} (${c.rep})</span>
       </div></div>
@@ -515,7 +597,10 @@
       <p><b>${esc(s.verdict)}</b></p>
       <p class="small muted">⬆️ Up: ${s.promoted.map(esc).join(', ')} · ⬇️ Down: ${s.relegated.map(esc).join(', ')}</p>
       ${s.retired.length ? `<p class="small"><b>Retired:</b> ${s.retired.map(esc).join(', ')}</p>` : ''}
-      ${s.youth.length ? `<p class="small"><b>Youth intake:</b> ${s.youth.map(esc).join(', ')}</p>` : ''}
+      ${s.departed.length ? `<p class="small"><b>Contracts expired (left on a free):</b> ${s.departed.map(esc).join(', ')}</p>` : ''}
+      ${s.graduatesLeft.length ? `<p class="small"><b>Left the academy:</b> ${s.graduatesLeft.map(esc).join(', ')}</p>` : ''}
+      ${s.youth.length ? `<p class="small"><b>Academy intake:</b> ${s.youth.map(esc).join(', ')}</p>` : ''}
+      ${G().userClub !== null && E.userClub().squad.length < 18 ? `<p class="small" style="color:var(--warn)">Your squad is down to ${E.userClub().squad.length}. Check the transfer market and the academy.</p>` : ''}
       <button class="btn primary block" data-a="close-render">${G().gameOver ? 'OK' : 'Start next season'}</button>`);
   }
 
@@ -546,6 +631,42 @@
       case 'play-quick': startMatch(false); break;
       case 'end-season': seasonReview(); break;
       case 'squad-sort': ui.squadSort = d.k; render(); break;
+      case 'squad-view': ui.squadView = d.v; render(); break;
+      case 'renew': {
+        const chk = E.canNegotiate(E.player(+d.id));
+        if (!chk.ok) { toast(chk.why); break; }
+        ui.neg = { pid: +d.id, years: chk.options[Math.min(1, chk.options.length - 1)], wage: 'demand' };
+        negotiationModal(); break;
+      }
+      case 'neg-years': ui.neg.years = +d.y; negotiationModal(); break;
+      case 'neg-wage': ui.neg.wage = d.k; negotiationModal(); break;
+      case 'neg-offer': {
+        const r = E.offerContract(ui.neg.pid, ui.neg.years, +d.w);
+        ui.neg = null; closeModal();
+        if (r.ok) { save(); toast('Contract signed! ✍️'); } else toast(r.why);
+        render(); break;
+      }
+      case 'prospect': prospectModal(+d.id); break;
+      case 'promote': {
+        const r = E.promoteProspect(+d.id);
+        closeModal();
+        if (r.ok) { save(); toast('Promoted to the first team!'); } else toast(r.why);
+        render(); break;
+      }
+      case 'release-prospect': {
+        const p = E.player(+d.id);
+        ask(`Release ${p.name} from the academy?`, 'Release', () => { E.releaseProspect(p.id); save(); render(); });
+        break;
+      }
+      case 'academy-upgrade': {
+        const cost = E.academyUpgradeCost();
+        ask(`Upgrade the academy to level ${G().academy.level + 1} for ${M(cost)}? Running costs rise to ${M(E.academyUpkeep() + 9000)}/wk.`, 'Upgrade', () => {
+          const r = E.upgradeAcademy();
+          if (r.ok) { save(); toast('Academy upgraded!'); } else toast(r.why);
+          render();
+        });
+        break;
+      }
       case 'player': playerModal(+d.id); break;
       case 'close': closeModal(); if (ui.match) { ui.matchSel = null; renderMatch(); } break;
       case 'close-render': closeModal(); ui.tab = 'home'; ui.leagueDiv = null; render(); break;

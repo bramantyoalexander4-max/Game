@@ -154,3 +154,4 @@ tr.zone-down td:first-child { box-shadow: inset 3px 0 0 var(--bad); }
 .key { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 5px 0 0; vertical-align: middle; }
 .key.up { background: var(--accent); } .key.down { background: var(--bad); margin-left: 4px; }
 .ev.pen { background: #2a2f1c; }
+.tag.exp { background: var(--warn); color: #2a1600; font-weight: 700; }
