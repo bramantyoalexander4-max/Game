@@ -2,7 +2,7 @@
 (function (root) {
   'use strict';
 
-  const SAVE_VERSION = 3;
+  const SAVE_VERSION = 4;
   let G = null; // current game state
 
   // ---------- random ----------
@@ -98,6 +98,15 @@
   const RENEW_WINDOW = 2; // players discuss new terms in the last N seasons of their deal
   const ACADEMY_MAX = 5;
   const ACADEMY_GRAD_AGE = 19; // prospects this old must be promoted or they leave
+  // wonderkids: young players with exceptional potential
+  const WK_POT = 84, WK_AGE = 21;
+  const TRAITS = {
+    Professional: { grow: 1.3, w: 12, desc: 'Lives for the game. Develops fastest.' },
+    Determined: { grow: 1.2, w: 15, desc: 'Works hard and handles pressure.' },
+    Balanced: { grow: 1, w: 48, desc: 'Develops at a normal pace.' },
+    Temperamental: { grow: 0.9, w: 15, desc: 'Moody: potential can swing either way.' },
+    Lazy: { grow: 0.7, w: 10, desc: 'Coasts in training. May never reach his potential.' },
+  };
 
   // ---------- players ----------
   function makeName() {
@@ -107,6 +116,7 @@
     let v = Math.pow(1.17, p.ovr - 50) * 60000;
     if (p.age <= 23) v *= 1 + (p.pot - p.ovr) / 35;
     if (p.age >= 30) v *= Math.max(0.25, 1 - (p.age - 29) * 0.14);
+    if (isWonderkid(p)) v *= 1 + (p.pot - 80) / 12; // hype premium
     return Math.max(25000, Math.round(v / 5000) * 5000);
   }
   function wageFor(p) {
@@ -119,16 +129,34 @@
     if (age > 31) ovr -= (age - 31) * 1.2;
     ovr = clamp(Math.round(ovr), 35, 93);
     const growth = age < 24 ? (24 - age) * 2 + rand() * 10 : rand() * 3;
-    const pot = clamp(Math.round(ovr + growth), ovr, 96);
+    let pot = clamp(Math.round(ovr + growth), ovr, 96);
+    if (age <= WK_AGE) pot = Math.min(pot, Math.max(WK_POT - 1, ovr)); // only true gems get wonderkid potential
     const p = {
       id: G.nextPid++, name: makeName(), pos, age, ovr, pot,
       fitness: 100, morale: 70, injury: 0,
       apps: 0, goals: 0, assists: 0, yellow: 0,
       club: null, wage: 0, contract: 0,
+      trait: rollTrait(false), seasonStart: ovr, playTime: 0,
     };
     p.wage = wageFor(p);
     return p;
   }
+  const isWonderkid = (p) => p.age <= WK_AGE && p.pot >= WK_POT;
+  function rollTrait(wonderkid) {
+    // the very best young players are more often driven professionals
+    return weighted(Object.keys(TRAITS), (k) => TRAITS[k].w * (wonderkid && (k === 'Professional' || k === 'Determined') ? 2.5 : 1));
+  }
+  function makeWonderkid(p) {
+    p.pot = ri(86, 96);
+    p.ovr = clamp(Math.round(p.pot - ri(16, 24) - Math.max(0, 19 - p.age) * 2.5), 45, p.pot - 6);
+    p.seasonStart = p.ovr;
+    p.trait = rollTrait(true);
+    p.wage = wageFor(p);
+    return p;
+  }
+  // growth multiplier from personality and recent playing time (0.8 benched … ~1.25 every week)
+  const traitGrowth = (p) => (TRAITS[p.trait] || TRAITS.Balanced).grow;
+  const growthMult = (p) => traitGrowth(p) * (0.8 + 0.08 * Math.min(p.playTime || 0, 8));
   function defaultContract(p) {
     // seasons remaining, counting the current one
     return p.age >= 32 ? ri(1, 2) : p.age >= 29 ? ri(1, 3) : ri(1, 5);
@@ -180,6 +208,11 @@
     for (let i = 0; i < 24; i++) {
       addPlayer(genPlayer(pick(['GK', 'DF', 'DF', 'MF', 'MF', 'FW']), ri(55, 70), 19, 33), null);
     }
+    shuffle(G.clubs.map((c) => c.id)).slice(0, 9).forEach((cid) => {
+      addPlayer(makeWonderkid(genPlayer(pick(['DF', 'MF', 'MF', 'FW', 'FW']), club(cid).rep, 16, 20)), cid);
+    });
+    addPlayer(makeWonderkid(genPlayer(pick(['MF', 'FW']), 60, 17, 17)), null);
+    G.offers = []; G.awards = [];
     G.academy = { level: clamp(Math.round((userClub().rep - 45) / 10), 1, 4), prospects: [] };
     for (let i = 0; i < 3; i++) newProspect(ri(15, 17));
     scheduleSeason();
@@ -535,7 +568,7 @@
     m.sides.forEach((cid, s) => {
       const r = res[s];
       squadOf(cid).forEach((p) => {
-        if (m.appeared.has(p.id)) { p.apps++; p.fitness = Math.round(m.fit[p.id]); }
+        if (m.appeared.has(p.id)) { p.apps++; p.fitness = Math.round(m.fit[p.id]); p.playTime = (p.playTime || 0) + 1; }
         const dm = r === 'W' ? 6 : r === 'D' ? 0 : -6;
         p.morale = clamp(p.morale + dm + (m.appeared.has(p.id) ? 2 : -2), 10, 100);
       });
@@ -579,19 +612,31 @@
       if (p.club === null) return;
       if (p.academy) {
         // academy coaching: quality of facilities drives development
-        if (p.ovr < p.pot && rand() < 0.035 * (1 + 0.2 * G.academy.level) * (p.pot - p.ovr) / 10) p.ovr++;
+        if (p.ovr < p.pot && rand() < 0.035 * (1 + 0.2 * G.academy.level) * traitGrowth(p) * (p.pot - p.ovr) / 10) p.ovr++;
         return;
       }
       if (p.injury > 0) { p.injury--; if (p.injury === 0 && p.club === G.userClub) pushNews(`✅ ${p.name} is back from injury.`); }
       p.fitness = clamp(p.fitness + intensity.recover, 0, 100);
       // development during the season
       if (p.age <= 27 && p.ovr < p.pot && p.injury === 0) {
-        const chance = 0.05 * intensity.growth * (p.pot - p.ovr) / 10 * (p.age <= 21 ? 1.5 : 1) * (p.apps > 0 ? 1.2 : 1);
+        const chance = 0.05 * intensity.growth * (p.pot - p.ovr) / 10 * (p.age <= 21 ? 1.5 : 1) * growthMult(p);
         if (rand() < chance) {
           p.ovr++;
-          if (p.club === G.userClub && rand() < 0.35) pushNews(`📈 ${p.name} is improving in training (now ${p.ovr}).`);
+          if (isWonderkid(p) && p.ovr >= 65 && p.ovr % 5 === 0) {
+            if (p.club === G.userClub) pushNews(`🌟 Wonderkid ${p.name} keeps getting better. He's now rated ${p.ovr}!`);
+            else if (rand() < 0.3) pushNews(`🌟 ${p.name} (${club(p.club).short}, ${p.age}) is the talk of the league, now rated ${p.ovr}.`);
+          } else if (p.club === G.userClub && rand() < 0.35) pushNews(`📈 ${p.name} is improving in training (now ${p.ovr}).`);
         }
       }
+      // a benched wonderkid gets restless
+      if (p.club === G.userClub && isWonderkid(p) && p.ovr >= 58 && G.week >= 6 && (p.playTime || 0) < 1 && !p.injury) {
+        p.morale = clamp(p.morale - 3, 10, 100);
+        if (p.morale < 40 && p.complained !== G.season) {
+          p.complained = G.season;
+          pushNews(`😤 ${p.name} is frustrated by his lack of game time and wants first-team football.`);
+        }
+      }
+      p.playTime = (p.playTime || 0) * 0.85;
       // training-ground knocks
       if (p.club === G.userClub && p.injury === 0 && rand() < 0.004 * intensity.injury) {
         p.injury = ri(1, 3);
@@ -613,6 +658,8 @@
       if (grads.length) pushNews(`🎓 Decide on ${grads.map((p) => p.name).join(', ')}: academy players turning ${ACADEMY_GRAD_AGE} leave unless promoted.`);
     }
     aiTransferActivity();
+    aiWonderkidRaid();
+    wonderkidBids();
     G.clubs.forEach((c) => { if (c.id !== G.userClub) { c.lineup = autoLineup(c.id); aiMentality(c); } });
     validateLineup(G.userClub);
     G.week++;
@@ -662,7 +709,13 @@
   function newProspect(age = ri(15, 16)) {
     const lvl = G.academy.level;
     const p = genPlayer(pick(['GK', 'DF', 'DF', 'MF', 'MF', 'FW', 'FW']), userClub().rep - 12 + lvl * 1.5, age, age);
-    p.pot = clamp(p.ovr + ri(8, 22) + lvl * 2, p.ovr, 96);
+    p.pot = clamp(p.ovr + ri(8, 22) + lvl * 2, p.ovr, Math.max(WK_POT - 1, p.ovr));
+    if (rand() < 0.03 + 0.03 * lvl) { // a gem: better academies unearth more of them
+      p.pot = ri(86, 96);
+      p.ovr = clamp(p.pot - ri(27, 35), 40, p.pot - 10);
+      p.seasonStart = p.ovr;
+      p.trait = rollTrait(true);
+    }
     p.potNoise = ri(-4, 4); // what the scouts get wrong; shrinks as the academy improves
     p.academy = true;
     p.club = G.userClub;
@@ -671,10 +724,29 @@
     G.academy.prospects.push(p.id);
     return p;
   }
+  const noiseOf = (p) => (p.potNoise !== undefined ? p.potNoise : ((p.id * 7919) % 9) - 4);
+  const knowsPotential = (p) => p.academy ? false : (p.scouted || p.club === G.userClub || p.age > 23);
+  const traitKnown = (p) => p.club === G.userClub || !!p.scouted;
+  const scoutCost = (p) => (isWonderkid(p) ? 60000 : 25000);
+  function scoutPlayer(pid) {
+    const p = player(pid);
+    if (!p || knowsPotential(p) && traitKnown(p)) return { ok: false, why: 'You already know all about him.' };
+    const cost = scoutCost(p);
+    if (userClub().budget < cost) return { ok: false, why: `A scout report costs ${money(cost)}.` };
+    userClub().budget -= cost;
+    p.scouted = true;
+    pushNews(`🔍 Scout report on ${p.name} (${p.age}): potential ${p.pot}, ${p.trait.toLowerCase()}.${isWonderkid(p) ? ' A genuine wonderkid!' : ''}`);
+    return { ok: true };
+  }
   function potentialRange(p) {
-    if (!p.academy) return [p.pot, p.pot];
+    if (!p.academy) {
+      if (knowsPotential(p)) return [p.pot, p.pot];
+      const err = 5; // rival clubs' youngsters: only rumours until scouted
+      const est = clamp(Math.round(p.pot + noiseOf(p) * err / 4), p.ovr, 99);
+      return [Math.max(p.ovr, est - err), Math.min(99, est + err)];
+    }
     const err = scoutError();
-    const est = clamp(Math.round(p.pot + p.potNoise * err / 4), p.ovr, 99);
+    const est = clamp(Math.round(p.pot + noiseOf(p) * err / 4), p.ovr, 99);
     return [Math.max(p.ovr, est - err), Math.min(99, est + err)];
   }
   function upgradeAcademy() {
@@ -706,6 +778,62 @@
     G.academy.prospects = G.academy.prospects.filter((id) => id !== pid);
     delete G.players[pid];
     return { ok: true };
+  }
+
+  // ---------- wonderkid bids ----------
+  function wonderkidBids() {
+    G.offers = (G.offers || []).filter((o) => o.expires > G.week + 1 && player(o.pid) && player(o.pid).club === G.userClub);
+    squadOf(G.userClub).filter((p) => isWonderkid(p) && p.ovr >= 60).forEach((p) => {
+      if (G.offers.some((o) => o.pid === p.id) || rand() > 0.07) return;
+      const val = playerValue(p);
+      const bidders = G.clubs.filter((c) => c.id !== G.userClub && c.budget > val * 1.3 && c.squad.length < 28 && c.rep >= userClub().rep - 3);
+      if (!bidders.length) return;
+      const b = weighted(bidders, (c) => Math.pow(c.rep - 40, 2));
+      const amount = Math.round(val * (1.2 + rand() * 0.6) / 10000) * 10000;
+      G.offers.push({ pid: p.id, club: b.id, amount, expires: G.week + 3 });
+      pushNews(`📨 ${b.name} have bid ${money(amount)} for ${p.name}. Respond on the Home screen.`);
+    });
+  }
+  function aiWonderkidRaid() {
+    // big clubs hoover up the best young talent from smaller sides
+    if (rand() > 0.08) return;
+    const targets = Object.values(G.players).filter((p) => p.club !== null && p.club !== G.userClub && !p.academy
+      && isWonderkid(p) && p.ovr >= 66);
+    if (!targets.length) return;
+    const p = pick(targets);
+    const from = club(p.club);
+    const fee = askingPrice(p);
+    const buyers = G.clubs.filter((c) => c.id !== G.userClub && c.id !== from.id && c.rep >= from.rep + 5
+      && c.budget > fee * 1.4 && c.squad.length < 27);
+    if (!buyers.length || from.squad.length <= 18) return;
+    const b = weighted(buyers, (c) => Math.pow(c.rep - 40, 2));
+    moveTo(p, b.id);
+    b.budget -= fee; from.budget += fee;
+    p.wage = signingWage(p); p.contract = 5;
+    pushNews(`💸 ${b.name} snap up wonderkid ${p.name} (${p.age}) from ${from.name} for ${money(fee)}.`);
+  }
+  function respondOffer(idx, accept) {
+    const o = (G.offers || [])[idx];
+    if (!o) return { ok: false, why: 'That offer has expired.' };
+    const p = player(o.pid), b = club(o.club);
+    if (accept) {
+      if (userClub().squad.length <= MIN_SQUAD) return { ok: false, why: `You need at least ${MIN_SQUAD} players.` };
+      if (b.budget < o.amount) { G.offers.splice(idx, 1); return { ok: false, why: `${b.name} can no longer afford the fee.` }; }
+      G.offers.splice(idx, 1);
+      sell(o.pid, { club: o.club, amount: o.amount });
+      return { ok: true };
+    }
+    G.offers.splice(idx, 1);
+    if (b.rep > userClub().rep + 3) {
+      p.morale = clamp(p.morale - 12, 10, 100);
+      pushNews(`😟 ${p.name} is unsettled after you turned down ${b.name}.`);
+    } else pushNews(`🚫 Rejected ${b.name}'s bid for ${p.name}.`);
+    return { ok: true };
+  }
+  function goldenBoy() {
+    const score = (p) => p.ovr + p.goals * 0.6 + p.assists * 0.4 + p.apps * 0.15 + (p.ovr - (p.seasonStart || p.ovr)) * 0.5;
+    return Object.values(G.players).filter((p) => p.club !== null && !p.academy && p.age <= WK_AGE)
+      .sort((a, b) => score(b) - score(a)).slice(0, 5);
   }
 
   // ---------- contracts ----------
@@ -756,7 +884,8 @@
     const c = club(p.club);
     const starter = c.lineup.some((l) => l.pid === p.id);
     const expiring = p.contract <= 1 ? 0.55 : 1; // sell now or lose him for nothing
-    return Math.round(playerValue(p) * (starter ? 1.35 : 1.1) * expiring / 10000) * 10000;
+    const prized = isWonderkid(p) ? 1.25 : 1; // clubs hate losing their gems
+    return Math.round(playerValue(p) * (starter ? 1.35 : 1.1) * expiring * prized / 10000) * 10000;
   }
   function signingWage(p) {
     return Math.round(Math.max(p.wage, wageFor(p)) * (p.club === null ? 1.15 : 1.05) / 100) * 100;
@@ -877,7 +1006,19 @@
       cupWinner: G.cup.winner !== null ? club(G.cup.winner).name : '-', cup: cupResult(G.userClub),
       topScorer: topScorer ? `${topScorer.name} (${club(topScorer.club).short}) — ${topScorer.goals}` : '-',
       retired: [], youth: [], departed: [], graduatesLeft: [], verdict: '', move: null,
+      goldenBoy: null, goldenBoyMine: false, nominees: [],
     };
+    const gb = goldenBoy();
+    if (gb.length) {
+      const w = gb[0];
+      summary.goldenBoy = `${w.name} (${club(w.club).short}, ${w.age}, rated ${w.ovr})`;
+      summary.nominees = gb.slice(1).map((p) => `${p.name} (${club(p.club).short})`);
+      summary.goldenBoyMine = w.club === G.userClub;
+      G.awards = G.awards || [];
+      G.awards.push({ season: G.season, name: w.name, club: club(w.club).name, ovr: w.ovr, mine: summary.goldenBoyMine });
+      if (summary.goldenBoyMine) { u.rep = Math.min(92, u.rep + 1); w.morale = 100; }
+      w.pot = Math.min(96, w.pot + 1);
+    }
     [[1, t1], [2, t2]].forEach(([d, table]) => {
       const byRep = [...table].sort((a, b) => b.rep - a.rep);
       table.forEach((c, i) => {
@@ -917,10 +1058,13 @@
     // ageing, development, retirement
     Object.values(G.players).forEach((p) => {
       p.age++;
-      if (p.age <= 23) p.ovr = Math.min(p.pot, p.ovr + ri(0, 3));
+      if (p.age <= 23) p.ovr = Math.min(p.pot, p.ovr + Math.round(ri(0, 3) * traitGrowth(p)));
+      if (p.age <= 23 && p.trait === 'Lazy' && rand() < 0.35) p.pot = Math.max(p.ovr, p.pot - ri(1, 3));
+      if (p.age <= 23 && p.trait === 'Temperamental' && rand() < 0.3) p.pot = clamp(p.pot + ri(-3, 3), p.ovr, 96);
       else if (p.age >= 30) p.ovr = Math.max(35, p.ovr - ri(0, p.age >= 33 ? 4 : 2));
       if (p.age >= 30) p.pot = p.ovr;
       p.apps = 0; p.goals = 0; p.assists = 0; p.yellow = 0; p.fitness = 100; p.injury = 0; p.morale = 70;
+      p.seasonStart = p.ovr; p.playTime = 0;
     });
     Object.values(G.players).forEach((p) => {
       const retireP = p.age >= 37 ? 1 : p.age >= 34 ? 0.35 : 0;
@@ -961,7 +1105,8 @@
       if (c.id !== G.userClub) {
         for (let i = 0; i < 3; i++) {
           const y = addPlayer(genPlayer(pick(['GK', 'DF', 'MF', 'MF', 'FW', 'DF']), c.rep - 2 + ri(-3, 6), 16, 17), c.id);
-          y.pot = clamp(y.pot + ri(0, 8), y.ovr, 96);
+          y.pot = clamp(y.pot + ri(0, 8), y.ovr, Math.max(WK_POT - 1, y.ovr));
+          if (rand() < 0.035) makeWonderkid(y);
           y.contract = 3;
         }
         for (const pos of Object.keys(SQUAD_TEMPLATE)) {
@@ -990,15 +1135,17 @@
 
     G.clubs.forEach((c) => { c.lineup = autoLineup(c.id); });
     G.lastSummary = summary;
-    if (!G.gameOver) {
-      G.season++;
-      G.week = 0;
-      G.seasonOver = false;
-      scheduleSeason();
-      G.news = [];
-      pushNews(`📅 Season ${G.season} begins in Division ${userClub().div}. The board expects a finish around ${ordinal(expectedPosition())}.`);
-    }
+    if (!G.gameOver) startNextSeason();
     return summary;
+  }
+  function startNextSeason() {
+    G.season++;
+    G.week = 0;
+    G.seasonOver = false;
+    scheduleSeason();
+    G.news = [];
+    G.offers = [];
+    pushNews(`📅 Season ${G.season} begins in Division ${userClub().div}. The board expects a finish around ${ordinal(expectedPosition())}.`);
   }
 
   // ---------- helpers ----------
@@ -1022,13 +1169,21 @@
   function serialize() { return JSON.stringify(G); }
   function load(json) {
     const data = typeof json === 'string' ? JSON.parse(json) : json;
-    if (!data || (data.version !== SAVE_VERSION && data.version !== 2)) throw new Error('Incompatible save');
+    if (!data || ![2, 3, SAVE_VERSION].includes(data.version)) throw new Error('Incompatible save');
     G = data;
     if (G.version === 2) {
       // v2 saves had no contracts or academy
       Object.values(G.players).forEach((p) => { p.contract = p.club === null ? 0 : defaultContract(p); });
       G.academy = { level: clamp(Math.round((userClub().rep - 45) / 10), 1, 4), prospects: [] };
       for (let i = 0; i < 3; i++) newProspect(ri(15, 17));
+      G.version = 3;
+    }
+    if (G.version === 3) {
+      // v3 saves had no traits or wonderkid state
+      Object.values(G.players).forEach((p) => {
+        p.trait = rollTrait(isWonderkid(p)); p.seasonStart = p.ovr; p.playTime = p.apps ? 3 : 0;
+      });
+      G.offers = []; G.awards = [];
       G.version = SAVE_VERSION;
     }
     return G;
@@ -1041,12 +1196,13 @@
     club, player, squadOf, userClub, totalWeeks, fixturesForWeek, userFixture,
     slotsFor, autoLineup, validateLineup, slotRating, posFactor, clubStrength, avgOvr,
     createMatch, stepMatch, simMatch, applyResult, playOtherMatches, possession, makeSub, benchOf,
-    endWeek, endSeason, standings, position, expectedPosition,
+    endWeek, endSeason, startNextSeason, standings, position, expectedPosition,
     playerValue, askingPrice, signingWage, canBuy, buy, getOffer, sell, release, releaseCost,
     money, ordinal, pushNews, gateIncome, weeklyIncome, wageBill,
     CUP_NAME, CUP_ROUNDS, CUP_PRIZE, PROMOTED, cupResult, weekLabel,
     ACADEMY_MAX, ACADEMY_GRAD_AGE, RENEW_WINDOW, academyUpgradeCost, academyUpkeep, academyIntake, prospects,
     potentialRange, upgradeAcademy, promoteProspect, releaseProspect,
     contractEnds, canNegotiate, offerContract, expiringPlayers, signingLength,
+    WK_POT, WK_AGE, TRAITS, isWonderkid, knowsPotential, traitKnown, scoutCost, scoutPlayer, respondOffer, goldenBoy,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

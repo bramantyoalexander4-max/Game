@@ -5,6 +5,9 @@ require('../js/engine.js');
 const E = globalThis.Engine;
 
 E.newGame(+(process.argv[2]||5), 'Tester', +(process.argv[3]||12345));
+const wkLog = [];
+const wkCount = () => Object.values(E.state.players).filter((p) => p.club !== null && E.isWonderkid(p)).length;
+assert(wkCount() >= 9, 'wonderkids seeded');
 let goals = 0, games = 0, homeWins = 0;
 for (let season = 0; season < 5; season++) {
   while (!E.state.seasonOver) {
@@ -12,6 +15,8 @@ for (let season = 0; season < 5; season++) {
     if (fx) E.applyResult(E.simMatch(fx));
     E.playOtherMatches(fx);
     E.fixturesForWeek(E.state.week).forEach((f) => { goals += f.hg + f.ag; games++; if (f.hg > f.ag) homeWins++; });
+    // respond to bids: reject them all (tests the morale path)
+    while ((E.state.offers || []).length) assert(E.respondOffer(0, false).ok);
     E.endWeek();
     E.state.gameOver = false; // keep simulating regardless of the board
   }
@@ -45,15 +50,18 @@ for (let season = 0; season < 5; season++) {
   Object.values(E.state.players).forEach((p) => {
     if (p.club !== null && !p.academy) assert(p.contract >= 1, `${p.name} contract ${p.contract}`);
   });
+  wkLog.push(`gb ${s.goldenBoy}`);
   console.log(`   academy L${E.state.academy.level}: ${E.prospects().map((p) => p.ovr + '/' + p.pot).join(' ')}; left on free: ${s.departed.length}; squad ${E.userClub().squad.length}`);
-  E.state.gameOver = false;
-  if (E.state.season === season + 1) { E.state.season++; E.state.week = 0; E.state.seasonOver = false; }
+  if (E.state.gameOver) { E.state.gameOver = false; E.startNextSeason(); } // the test bot ignores sackings
   console.log(`S${s.season}: champ ${s.champion}/${s.d2Champion}, up ${s.promoted}, down ${s.relegated}, cup ${s.cupWinner}; user D${s.division} ${s.position} (exp ${s.expected}) cup ${s.cup}, budget ${E.money(E.userClub().budget)}, top ${s.topScorer}`);
   E.state.clubs.forEach((c) => {
     assert(c.squad.length >= 16, `${c.name} squad ${c.squad.length}`);
     c.squad.forEach((id) => assert(E.player(id) && E.player(id).club === c.id));
   });
 }
+console.log('wonderkids now', wkCount(), wkLog.join(' | '));
+const gems = Object.values(E.state.players).filter((p) => p.trait && p.age >= 22 && p.age <= 25 && p.pot >= 86);
+console.log('ex-wonderkids aged 22-25 (ovr/pot trait):', gems.map((p) => `${p.ovr}/${p.pot} ${p.trait[0]}`).join(', '));
 console.log('goals/game', (goals / games).toFixed(2), 'home win %', (100 * homeWins / games).toFixed(1));
 console.log('budgets', E.state.clubs.map((c) => c.short + c.div + ' ' + c.rep + ' ' + E.money(c.budget)).join(', '));
 // save round-trip

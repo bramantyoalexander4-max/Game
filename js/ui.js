@@ -24,6 +24,12 @@
   const posTag = (p) => `<span class="pos ${p}">${p}</span>`;
   const bar = (v, color) => `<div class="bar"><i style="width:${Math.max(0, Math.min(100, v))}%;background:${color || (v > 75 ? 'var(--accent)' : v > 50 ? 'var(--warn)' : 'var(--bad)')}"></i></div>`;
   const stars = (rep) => '★'.repeat(Math.max(1, Math.round((rep - 45) / 8)));
+  const wk = (p) => (E.isWonderkid(p) ? ' <span class="wk" title="Wonderkid">🌟</span>' : '');
+  function potText(p) {
+    const [lo, hi] = E.potentialRange(p);
+    return lo === hi ? `${lo}` : `${lo}–${hi}`;
+  }
+  const growth = (p) => p.ovr - (p.seasonStart || p.ovr);
   const formHtml = (f) => `<span class="form">${f.map((r) => `<i class="${r}">${r}</i>`).join('')}</span>`;
 
   function save() {
@@ -132,7 +138,14 @@
     const last = g.week > 0 && !g.gameOver ? relevantFixtures(g.week - 1) : [];
     const lastHtml = last.length ? `<h2>Last week · ${esc(E.weekLabel(g.week - 1))}</h2><div class="list">${last.map(fxRow).join('')}</div>` : '';
     const news = g.news.slice(0, 15).map((n) => `<div class="news"><small>S${n.season} W${n.week + 1}</small>${esc(n.text)}</div>`).join('');
-    return top + lastHtml + `<h2>Inbox</h2><div class="list">${news || '<div class="news muted">No news yet.</div>'}</div>`;
+    const offers = (g.offers || []).filter((o) => E.player(o.pid) && E.player(o.pid).club === g.userClub);
+    const offersHtml = offers.length && !g.gameOver ? `<h2>📨 Transfer offers</h2>${offers.map((o) => {
+      const p = E.player(o.pid), b = E.club(o.club), i = g.offers.indexOf(o);
+      return `<div class="card"><div class="row">${crest(b)}<div class="grow"><b>${esc(b.name)}</b> bid <b style="color:var(--accent2)">${M(o.amount)}</b>
+        for ${esc(p.name)}${wk(p)}<div class="small muted">Value ${M(E.playerValue(p))} · offer expires after week ${o.expires}${b.rep > E.userClub().rep + 3 ? ' · rejecting a bigger club will unsettle him' : ''}</div></div></div>
+        <div class="btns" style="margin-top:10px"><button class="btn" data-a="offer-no" data-i="${i}">Reject</button><button class="btn primary" data-a="offer-yes" data-i="${i}">Accept</button></div></div>`;
+    }).join('')}` : '';
+    return top + offersHtml + lastHtml + `<h2>Inbox</h2><div class="list">${news || '<div class="news muted">No news yet.</div>'}</div>`;
   }
   const clubPos = (c) => `${E.ordinal(E.position(c.id))} in Div ${c.div}`;
   // the fixtures a user cares about in a week: their division's games, or the cup ties
@@ -158,6 +171,7 @@
       age: (a, b) => a.age - b.age,
       value: (a, b) => E.playerValue(b) - E.playerValue(a),
       goals: (a, b) => b.goals - a.goals || b.assists - a.assists,
+      growth: (a, b) => growth(b) - growth(a) || a.age - b.age,
     }[ui.squadSort];
     return s.sort(by);
   }
@@ -165,8 +179,8 @@
     const inXI = p.club === G().userClub && E.userClub().lineup.some((l) => l.pid === p.id);
     return `<div class="item tap" data-a="${action}" data-id="${p.id}">
       ${posTag(p.pos)}<div class="ovr">${p.ovr}</div>
-      <div class="grow"><div class="name">${esc(p.name)}</div>
-        <div class="small muted">${p.age}y · pot ${p.pot} · ${M(E.playerValue(p))}${extra}</div></div>
+      <div class="grow"><div class="name">${esc(p.name)}${wk(p)}</div>
+        <div class="small muted">${p.age}y · pot ${potText(p)} · ${M(E.playerValue(p))}${extra}</div></div>
       ${p.injury ? `<span class="tag inj">INJ ${p.injury}w</span>` : inXI ? '<span class="tag xi">XI</span>' : ''}
       ${p.club !== null && p.contract <= 1 ? '<span class="tag exp">EXP</span>' : ''}
       ${bar(p.fitness)}</div>`;
@@ -177,10 +191,11 @@
     if (ui.squadView === 'contracts') return nav + viewContracts();
     if (ui.squadView === 'academy') return nav + viewAcademy();
     const s = sortedSquad();
-    const sorts = [['pos', 'Position'], ['ovr', 'Rating'], ['age', 'Age'], ['value', 'Value'], ['goals', 'Goals']];
+    const sorts = [['pos', 'Position'], ['ovr', 'Rating'], ['age', 'Age'], ['growth', 'Growth'], ['value', 'Value'], ['goals', 'Goals']];
     return nav + `<div class="row between"><h2>Squad (${s.length})</h2><span class="small muted">Wages ${M(E.wageBill(G().userClub))}/wk</span></div>
       <div class="chips">${sorts.map(([k, l]) => `<button class="btn ${ui.squadSort === k ? 'on' : ''}" data-a="squad-sort" data-k="${k}">${l}</button>`).join('')}</div>
-      <div class="list">${s.map((p) => playerRow(p, ui.squadSort === 'goals' ? ` · ⚽${p.goals} 🅰${p.assists}` : '')).join('')}</div>`;
+      <div class="list">${s.map((p) => playerRow(p, ui.squadSort === 'goals' ? ` · ⚽${p.goals} 🅰${p.assists}`
+        : ui.squadSort === 'growth' ? ` · <b style="color:${growth(p) > 0 ? 'var(--accent)' : 'inherit'}">${growth(p) > 0 ? '+' : ''}${growth(p)}</b> this season` : '')).join('')}</div>`;
   }
   function contractText(p) {
     if (p.club === null) return 'None (free agent)';
@@ -197,7 +212,7 @@
         Anyone whose contract runs out leaves for free at the end of the season. Rival clubs sell players in their final year cheaply.</p></div>
       <div class="list">${s.map((p) => `<div class="item tap" data-a="player" data-id="${p.id}">
         ${posTag(p.pos)}<div class="ovr">${p.ovr}</div>
-        <div class="grow"><div class="name">${esc(p.name)}</div><div class="small muted">${p.age}y · ${M(p.wage)}/wk · until S${E.contractEnds(p)}</div></div>
+        <div class="grow"><div class="name">${esc(p.name)}${wk(p)}</div><div class="small muted">${p.age}y · ${M(p.wage)}/wk · until S${E.contractEnds(p)}</div></div>
         ${p.contract <= 1 ? '<span class="tag exp">EXPIRING</span>' : p.contract <= E.RENEW_WINDOW ? '<span class="tag">Can renew</span>' : ''}</div>`).join('')}</div>`;
   }
   function viewAcademy() {
@@ -219,7 +234,7 @@
       <h2>Prospects (${ps.length})</h2>
       <div class="list">${ps.map((p) => { const [lo, hi] = E.potentialRange(p); return `<div class="item tap" data-a="prospect" data-id="${p.id}">
         ${posTag(p.pos)}<div class="ovr">${p.ovr}</div>
-        <div class="grow"><div class="name">${esc(p.name)}</div><div class="small muted">${p.age}y · potential ${lo === hi ? lo : lo + '–' + hi}</div></div>
+        <div class="grow"><div class="name">${esc(p.name)}${lo >= E.WK_POT ? ' <span class="wk">🌟</span>' : ''}</div><div class="small muted">${p.age}y · potential ${lo === hi ? lo : lo + '–' + hi} · ${esc(p.trait)}</div></div>
         ${p.age >= E.ACADEMY_GRAD_AGE - 1 ? '<span class="tag exp">FINAL YEAR</span>' : ''}</div>`; }).join('') || '<div class="news muted">No prospects. A new intake arrives each summer.</div>'}</div>`;
   }
   function prospectModal(pid) {
@@ -266,17 +281,23 @@
       actions = `${p.contract <= E.RENEW_WINDOW ? `<button class="btn primary block" style="margin-bottom:8px" data-a="renew" data-id="${p.id}">📝 Offer new contract</button>` : ''}
         <div class="btns"><button class="btn" data-a="sell" data-id="${p.id}">💰 Find buyer</button>
         <button class="btn danger" data-a="release" data-id="${p.id}">Release (${M(E.releaseCost(p.id))})</button></div>`;
-    } else if (!G().gameOver) {
+    }
+    const scoutable = !mine && !(E.knowsPotential(p) && E.traitKnown(p)) && !G().gameOver;
+    const scoutBtn = scoutable ? `<button class="btn block" style="margin-bottom:8px" data-a="scout" data-id="${p.id}">🔍 Scout report · ${M(E.scoutCost(p))}</button>` : '';
+    if (!mine && !G().gameOver) {
       const chk = E.canBuy(p.id);
       actions = chk.ok
         ? `<button class="btn primary block" data-a="buy" data-id="${p.id}">${chk.fee ? 'Buy for ' + M(chk.fee) : 'Sign free agent'} · ${M(chk.wage)}/wk · ${chk.contract}-season deal</button>`
         : `<p class="small" style="color:var(--warn)">${esc(chk.why)}</p>`;
     }
     openModal(`<div class="row">${posTag(p.pos)}<div class="ovr" style="font-size:26px;width:auto">${p.ovr}</div>
-        <div class="grow"><b style="font-size:18px">${esc(p.name)}</b><div class="small muted">${c ? esc(c.name) : 'Free agent'}</div></div></div>
+        <div class="grow"><b style="font-size:18px">${esc(p.name)}${wk(p)}</b><div class="small muted">${c ? esc(c.name) : 'Free agent'}</div></div></div>
+      ${E.isWonderkid(p) ? `<div class="wkcard">🌟 <b>Wonderkid.</b> One of the most talented young players around${mine ? ': give him minutes and he will fly.' : '.'}</div>` : ''}
       <div class="kv">
         <span>Age</span><span>${p.age}</span>
-        <span>Potential</span><span>${p.pot}</span>
+        <span>Potential</span><span>${potText(p)}${E.knowsPotential(p) ? '' : ' <span class="muted small">(rumoured)</span>'}</span>
+        <span>Personality</span><span>${E.traitKnown(p) ? `${esc(p.trait)}` : '<span class="muted">Unknown</span>'}</span>
+        ${p.club !== null && p.age <= 23 && (mine || growth(p) !== 0) ? `<span>This season</span><span>${growth(p) > 0 ? '+' : ''}${growth(p)} rating${mine ? ` · ${p.playTime >= 3 ? 'regular starter' : p.playTime >= 1 ? 'some minutes' : 'not playing'}` : ''}</span>` : ''}
         <span>Value</span><span>${M(E.playerValue(p))}</span>
         ${!mine && p.club !== null ? `<span>Asking price</span><span>${M(E.askingPrice(p))}</span>` : ''}
         <span>Wage</span><span>${M(p.wage)}/wk</span>
@@ -285,7 +306,8 @@
         <span>Morale</span><span>${p.morale > 75 ? '😀' : p.morale > 50 ? '🙂' : p.morale > 30 ? '😐' : '😠'} ${p.morale}</span>
         <span>Status</span><span>${p.injury ? `Injured (${p.injury} wk)` : 'Available'}</span>
         <span>Season</span><span>${p.apps} apps · ${p.goals} goals · ${p.assists} assists</span>
-      </div>${actions}
+      </div>${E.traitKnown(p) ? `<p class="small muted" style="margin-top:0">${esc(p.trait)}: ${esc(E.TRAITS[p.trait].desc)}</p>` : ''}
+      ${scoutBtn}${actions}
       <button class="btn block" style="margin-top:8px" data-a="close">Close</button>`);
   }
 
@@ -324,7 +346,7 @@
       ${pitchHtml(lineup, selIdx, null, 'xi')}
       <h2>Bench & reserves</h2>
       <div class="list">${bench.map((p) => `<div class="item tap ${selBench === p.id ? 'sel' : ''}" data-a="bench" data-id="${p.id}">
-        ${posTag(p.pos)}<div class="ovr">${p.ovr}</div><div class="grow"><div class="name">${esc(p.name)}</div>
+        ${posTag(p.pos)}<div class="ovr">${p.ovr}</div><div class="grow"><div class="name">${esc(p.name)}${wk(p)}</div>
         <div class="small muted">${p.age}y · morale ${p.morale}</div></div>
         ${p.injury ? `<span class="tag inj">INJ ${p.injury}w</span>` : ''}${bar(p.fitness)}</div>`).join('')}</div>`;
   }
@@ -426,14 +448,16 @@
   function viewTransfers() {
     const g = G();
     const q = ui.marketQuery.toLowerCase();
+    const wkOnly = ui.marketPos === 'WK';
     const pool = Object.values(g.players).filter((p) => p.club !== g.userClub
-      && (ui.marketPos === 'ALL' || p.pos === ui.marketPos)
+      && (wkOnly ? E.isWonderkid(p) : ui.marketPos === 'ALL' || p.pos === ui.marketPos)
       && (!ui.marketMax || E.askingPrice(p) <= ui.marketMax)
       && (!q || p.name.toLowerCase().includes(q)))
-      .sort((a, b) => b.ovr - a.ovr).slice(0, 60);
+      .sort(wkOnly ? (a, b) => E.potentialRange(b)[1] - E.potentialRange(a)[1] || b.ovr - a.ovr : (a, b) => b.ovr - a.ovr).slice(0, 60);
     const maxes = [[0, 'Any price'], [1e6, '≤ £1M'], [3e6, '≤ £3M'], [6e6, '≤ £6M'], [12e6, '≤ £12M']];
     return `<h2>Transfer market</h2>
-      <div class="chips">${['ALL', 'GK', 'DF', 'MF', 'FW'].map((p) => `<button class="btn ${ui.marketPos === p ? 'on' : ''}" data-a="mpos" data-p="${p}">${p}</button>`).join('')}</div>
+      <div class="chips">${['ALL', 'WK', 'GK', 'DF', 'MF', 'FW'].map((p) => `<button class="btn ${ui.marketPos === p ? 'on' : ''}" data-a="mpos" data-p="${p}">${p === 'WK' ? '🌟 Wonderkids' : p}</button>`).join('')}</div>
+      ${wkOnly ? `<p class="small muted">Every player aged ${E.WK_AGE} or under with elite potential. Their exact potential and personality are only rumours until you pay for a scout report. Clubs charge a premium for them, and big clubs will try to snatch them first.</p>` : ''}
       <div class="row" style="margin-bottom:10px">
         <input class="grow" id="mq" placeholder="Search name…" value="${esc(ui.marketQuery)}">
         <select id="mmax">${maxes.map(([v, l]) => `<option value="${v}" ${ui.marketMax === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
@@ -461,6 +485,8 @@
       <h2>History</h2>
       <div class="list">${g.history.length ? g.history.map((h) => `<div class="item"><div class="grow">Season ${h.season}<div class="small muted">Cup: ${esc(h.cup)}</div></div>
         <b>${E.ordinal(h.position)} · Div ${h.division}${h.move === 'up' ? ' ⬆️' : h.move === 'down' ? ' ⬇️' : ''}</b><span class="muted small">${h.points} pts</span></div>`).join('') : '<div class="news muted">Your first season is under way.</div>'}</div>
+      ${(g.awards || []).length ? `<h2>🏅 Golden Boy winners</h2><div class="list">${g.awards.map((a) => `<div class="item ${a.mine ? 'sel' : ''}">
+        <div class="grow">Season ${a.season}<div class="small muted">${esc(a.club)}</div></div><b>${esc(a.name)}</b><span class="muted small">${a.ovr}</span></div>`).join('')}</div>` : ''}
       <h2>Game</h2>
       <div class="btns"><button class="btn" data-a="save">💾 Save</button><button class="btn danger" data-a="new-career">New career</button></div>
       <p class="small muted">Progress also saves automatically after every matchday (in this browser).</p>`;
@@ -592,6 +618,8 @@
         <span>Prize money</span><span>${M(s.prize)}</span>
         <span>Golden boot</span><span>${esc(s.topScorer)}</span>
       </div>
+      ${s.goldenBoy ? `<div class="wkcard">🏅 <b>Golden Boy:</b> ${esc(s.goldenBoy)}${s.goldenBoyMine ? ' <b>(your player!)</b> Your club\'s reputation grows.' : ''}
+        ${s.nominees.length ? `<div class="small muted">Also nominated: ${s.nominees.map(esc).join(', ')}</div>` : ''}</div>` : ''}
       ${s.move === 'up' ? '<p style="color:var(--accent);font-weight:800">⬆️ PROMOTED TO DIVISION 1!</p>' : ''}
       ${s.move === 'down' ? '<p style="color:var(--bad);font-weight:800">⬇️ Relegated to Division 2.</p>' : ''}
       <p><b>${esc(s.verdict)}</b></p>
@@ -685,6 +713,16 @@
         ui.resultsWeek = Math.max(0, Math.min(E.totalWeeks() - 1, cur + +d.d)); render(); break;
       }
       case 'mpos': ui.marketPos = d.p; render(); break;
+      case 'scout': {
+        const r = E.scoutPlayer(+d.id);
+        if (r.ok) { save(); playerModal(+d.id); render(); toast('Scout report received 🔍'); } else toast(r.why);
+        break;
+      }
+      case 'offer-yes': case 'offer-no': {
+        const r = E.respondOffer(+d.i, a === 'offer-yes');
+        if (!r.ok) toast(r.why); else { save(); if (a === 'offer-yes') toast('Player sold.'); }
+        render(); break;
+      }
       case 'buy': {
         const r = E.buy(+d.id);
         closeModal();
