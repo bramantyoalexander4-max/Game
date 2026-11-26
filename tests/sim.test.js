@@ -1,7 +1,7 @@
 // Headless smoke test: plays several full seasons and checks invariants.
 // Run with: node tests/sim.test.js
 const assert = require('assert');
-require('../data/england.js');
+['england', 'spain', 'italy', 'france', 'germany', 'europe'].forEach((f) => require(`../data/${f}.js`));
 require('../js/engine.js');
 const E = globalThis.Engine;
 
@@ -22,12 +22,30 @@ for (let season = 0; season < 5; season++) {
     E.state.gameOver = false; // keep simulating regardless of the board
   }
   const table = E.standings();
-  const expectedGames = [1, 2].reduce((a, d) => { const n = E.standings(d).length; return a + n * (n - 1) * 2; }, 0);
+  const divs = E.leagueDivs();
+  const expectedGames = divs.reduce((a, d) => { const n = E.standings(d).length; return a + n * (n - 1) * 2; }, 0);
   assert.strictEqual(E.state.clubs.reduce((a, c) => a + c.table.p, 0), expectedGames);
-  assert(E.state.cup.winner !== null, 'cup has a winner');
-  assert.strictEqual(E.state.fixtures.filter((f) => f.comp === 'CUP').length, E.state.clubs.length - 1); // a knockout has n-1 ties
-  E.state.fixtures.filter((f) => f.comp === 'CUP').forEach((f) => assert(f.played && f.winner !== undefined));
-  const before = [1, 2].map((d) => E.standings(d).map((c) => c.id));
+  E.state.cups.forEach((cup, ci) => {
+    const ties = E.state.fixtures.filter((f) => f.comp === 'CUP' && f.cup === ci);
+    assert.strictEqual(ties.length, cup.clubs.length - 1, `${cup.name}: a knockout has n-1 ties`);
+    assert(cup.winner !== null && ties.every((f) => f.played && f.winner !== undefined));
+  });
+  if (E.state.cl) {
+    const lp = E.state.fixtures.filter((f) => f.comp === 'CL' && f.stage === 'lp');
+    assert.strictEqual(lp.length, E.state.cl.clubs.length * 4, 'league phase: 8 games per club');
+    E.state.cl.clubs.forEach((id) => assert.strictEqual(E.state.cl.table[id].p, 8));
+    const opp = {}; lp.forEach((f) => { (opp[f.home] = opp[f.home] || new Set()).add(f.away); (opp[f.away] = opp[f.away] || new Set()).add(f.home); });
+    Object.values(opp).forEach((set) => assert.strictEqual(set.size, 8, '8 different opponents'));
+    assert.strictEqual(E.state.fixtures.filter((f) => f.comp === 'CL' && f.stage === 'ko').length, 8 + 8 + 4 + 2 + 1);
+    assert(E.state.cl.winner !== null);
+  }
+  // every club plays at most once per week
+  for (let w = 0; w < E.totalWeeks(); w++) {
+    const seen = new Set();
+    E.fixturesForWeek(w).forEach((f) => { assert(!seen.has(f.home) && !seen.has(f.away), `double booking in week ${w}`); seen.add(f.home); seen.add(f.away); });
+  }
+  const before = Object.fromEntries(divs.map((d) => [d, E.standings(d).map((c) => c.id)]));
+  const clWinner = E.state.cl ? E.club(E.state.cl.winner).name : '-';
   // contracts: renew one expiring player (at his demand, which is always accepted), let the rest go
   const exp = E.expiringPlayers();
   let renewed = null;
@@ -42,10 +60,12 @@ for (let season = 0; season < 5; season++) {
   if (E.academyUpgradeCost() !== null && E.userClub().budget > E.academyUpgradeCost() * 3) assert(E.upgradeAcademy().ok);
   const s = E.endSeason();
   // promotion/relegation swapped the right clubs
-  const k = E.promotedCount();
-  before[0].slice(-k).forEach((id) => assert.strictEqual(E.club(id).div, 2));
-  before[1].slice(0, k).forEach((id) => assert.strictEqual(E.club(id).div, 1));
-  assert.strictEqual(E.state.clubs.filter((c) => c.div === 1).length, before[0].length);
+  E.state.meta.promotions.forEach((p) => {
+    before[p.up].slice(-p.count).forEach((id) => assert.strictEqual(E.club(id).div, p.down));
+    before[p.down].slice(0, p.count).forEach((id) => assert.strictEqual(E.club(id).div, p.up));
+  });
+  divs.forEach((d) => assert.strictEqual(E.state.clubs.filter((c) => c.div === d).length, before[d].length));
+  if (E.state.cl && !E.state.gameOver) assert.strictEqual(E.state.cl.clubs.length, 36);
   leaving.forEach((id) => assert(!E.player(id) || E.player(id).club !== E.state.userClub, 'expired contract left'));
   if (renewed && E.player(renewed)) assert.strictEqual(E.player(renewed).club, E.state.userClub);
   assert(E.prospects().length >= E.academyIntake(), 'academy intake arrived');
@@ -56,7 +76,7 @@ for (let season = 0; season < 5; season++) {
   wkLog.push(`gb ${s.goldenBoy}`);
   console.log(`   academy L${E.state.academy.level}: ${E.prospects().map((p) => p.ovr + '/' + p.pot).join(' ')}; left on free: ${s.departed.length}; squad ${E.userClub().squad.length}`);
   if (E.state.gameOver) { E.state.gameOver = false; E.startNextSeason(); } // the test bot ignores sackings
-  console.log(`S${s.season}: champ ${s.champion}/${s.d2Champion}, up ${s.promoted}, down ${s.relegated}, cup ${s.cupWinner}; user D${s.division} ${s.position} (exp ${s.expected}) cup ${s.cup}, budget ${E.money(E.userClub().budget)}, top ${s.topScorer}`);
+  console.log(`S${s.season}: ${s.champions.map((c) => c.league + ' ' + c.club).join(', ')}; CL ${clWinner}; cup ${s.cupWinner}; user D${s.division} ${s.position} (exp ${s.expected}) cup ${s.cup} CL ${s.cl}, budget ${E.money(E.userClub().budget)}, top ${s.topScorer}`);
   E.state.clubs.forEach((c) => {
     assert(c.squad.length >= 16, `${c.name} squad ${c.squad.length}`);
     c.squad.forEach((id) => assert(E.player(id) && E.player(id).club === c.id));

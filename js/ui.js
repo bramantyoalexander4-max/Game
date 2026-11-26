@@ -12,7 +12,7 @@
     squadSort: 'pos', squadView: 'team', neg: null,
     tacticSel: null, // index into lineup, or 'b:<pid>' for a bench player
     marketPos: 'ALL', marketMax: 0, marketQuery: '',
-    leagueView: 'table', resultsWeek: null, leagueDiv: null, dataset: null, mname: 'Manager',
+    leagueView: 'table', resultsWeek: null, leagueDiv: null, dataset: null, mname: 'Manager', startCountry: null, marketLeague: 'ALL',
     match: null, matchTimer: null, matchSpeed: 1, matchSel: null, matchPaused: false,
   };
 
@@ -32,8 +32,29 @@
   const growth = (p) => p.ovr - (p.seasonStart || p.ovr);
   const formHtml = (f) => `<span class="form">${f.map((r) => `<i class="${r}">${r}</i>`).join('')}</span>`;
 
+  // saves are gzip-compressed where the browser supports it: a big real-football world is ~1 MB of JSON
+  async function pack(json) {
+    if (!window.CompressionStream) return json;
+    const stream = new Blob([json]).stream().pipeThrough(new CompressionStream('gzip'));
+    const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return 'gz:' + btoa(bin);
+  }
+  async function unpack(str) {
+    if (!str || !str.startsWith('gz:')) return str;
+    const bin = atob(str.slice(3));
+    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+    return new Response(stream).text();
+  }
+  let saveSeq = 0;
   function save() {
-    try { localStorage.setItem(SAVE_KEY, E.serialize()); } catch (e) { /* storage full or blocked */ }
+    const json = E.serialize(), seq = ++saveSeq;
+    pack(json).then((data) => {
+      if (seq !== saveSeq) return; // a newer save superseded this one
+      try { localStorage.setItem(SAVE_KEY, data); } catch (e) { toast('Could not save: browser storage is full or blocked.'); }
+    }).catch(() => { try { localStorage.setItem(SAVE_KEY, json); } catch (e) { /* ignore */ } });
   }
   function hasSave() { try { return !!localStorage.getItem(SAVE_KEY); } catch (e) { return false; } }
 
@@ -67,15 +88,19 @@
       return;
     }
     const sets = E.datasets();
-    if (!ui.dataset) ui.dataset = (sets.find((d) => d.id !== 'fictional') || sets[0]).id;
+    if (!ui.dataset) ui.dataset = (sets.find((d) => d.id === 'europe') || sets.find((d) => d.id !== 'fictional') || sets[0]).id;
     const ds = E.getDataset(ui.dataset);
     const clubs = ds.clubs;
+    const countries = [...new Set(ds.leagues.map((l) => l.country))];
+    if (!countries.includes(ui.startCountry)) ui.startCountry = countries[0];
     const label = (c) => {
-      const same = clubs.filter((x) => x.div === c.div).sort((a, b) => b.rep - a.rep);
+      const same = clubs.filter((x) => x.league === c.league).sort((a, b) => b.rep - a.rep);
       const rank = same.indexOf(c) + 1, n = same.length;
-      if (c.div === 1) return rank <= 3 ? 'Title contender' : rank <= n - 5 ? 'Mid-table' : 'Relegation fight';
+      const tier = ds.leagues.find((l) => l.key === c.league).tier;
+      if (tier === 1) return rank <= 3 ? 'Title contender' : rank <= n - 5 ? 'Mid-table' : 'Relegation fight';
       return rank <= Math.ceil(n / 3) ? 'Promotion hopeful' : 'Long-term project';
     };
+    const shownLeagues = ds.leagues.filter((l) => l.country === ui.startCountry);
     app.innerHTML = `<div class="start">
       <div class="logo"><h1>⚽ Touchline <span>Manager</span></h1><p class="muted">Pick a club and lead them to glory.</p></div>
       <div class="card"><label class="muted small">Manager name</label><br>
@@ -83,7 +108,8 @@
       <h2>Game world</h2>
       <div class="btns" style="margin-bottom:6px">${sets.map((d) => `<button class="btn ${d.id === ds.id ? 'on' : ''}" data-a="dataset" data-id="${esc(d.id)}">${esc(d.short || d.name)}</button>`).join('')}</div>
       <p class="small muted">${esc(ds.note || '')}</p>
-      ${[1, 2].map((div) => `<h2>${esc(ds.divNames[div - 1])}</h2><div class="list">${clubs.map((c, i) => (c.div !== div ? '' : `
+      ${countries.length > 1 ? `<div class="chips">${countries.map((c) => `<button class="btn ${c === ui.startCountry ? 'on' : ''}" data-a="start-country" data-c="${esc(c)}">${esc(c)}</button>`).join('')}</div>` : ''}
+      ${shownLeagues.map((lg) => `<h2>${esc(lg.name)}</h2><div class="list">${clubs.map((c, i) => (c.league !== lg.key ? '' : `
         <div class="item tap" data-a="pick-club" data-i="${i}">
           <div class="crest" style="background:${esc(c.color)}">${esc(c.short)}</div>
           <div class="grow"><div class="name">${esc(c.name)}</div><div class="stars">${stars(c.rep)}</div></div>
@@ -124,25 +150,35 @@
         <p>${esc(champ.name)} are ${esc(E.divName(E.userClub().div))} champions. You finished <b>${E.ordinal(E.position(g.userClub))}</b> (board expected ${E.ordinal(E.expectedPosition())}).</p>
         <button class="btn primary block" data-a="end-season">See season review</button></div>`;
     } else if (!E.userFixture()) {
-      const cupWeek = g.calendar[g.week].type === 'cup';
-      const cupNote = !cupWeek ? `There's no ${esc(E.divName(E.userClub().div))} game this week.`
-        : g.cup.alive.includes(g.userClub) ? 'You have a bye this round.' : `You're out of the ${esc(E.cupName())}.`;
+      const slot = g.calendar[g.week];
+      let cupNote;
+      if (slot.type === 'league') cupNote = `There's no ${esc(E.divName(E.userClub().div))} game this week.`;
+      else if (slot.type === 'cl') {
+        const r = E.clResult(g.userClub);
+        cupNote = r === null ? `It's a ${esc(E.clName())} week and you're not in it this season.` : `It's a ${esc(E.clName())} week. You're out: ${esc(r.toLowerCase())}.`;
+      } else {
+        const cup = g.cups[E.userCupIdx()];
+        const round = cup ? slot.k - cup.offset : -1;
+        cupNote = round < 0 ? `It's a cup week, but the ${esc(E.cupName())} has no round this week.`
+          : cup.alive.includes(g.userClub) ? 'You have a bye this round.' : `You're out of the ${esc(E.cupName())}.`;
+      }
       top = `<div class="card"><div class="small muted">${esc(E.weekLabel(g.week))}</div>
         <h2>No match this week</h2><p class="muted">${cupNote} The squad gets a week to rest.</p>
         <button class="btn primary block" data-a="skip-week">⏩ Continue</button></div>`;
     } else {
       const fx = E.userFixture();
       const h = E.club(fx.home), a = E.club(fx.away);
-      const cup = fx.comp === 'CUP';
+      const cup = !!fx.ko;
+      const icon = fx.comp === 'CL' ? '⭐ ' : fx.comp === 'CUP' ? '🏆 ' : `${esc(E.divName(E.userClub().div))} · `;
       const lineup = E.validateLineup(g.userClub);
       top = `<div class="card">
-        <div class="row between small muted"><span>${cup ? '🏆 ' : `${esc(E.divName(E.userClub().div))} · `}${esc(E.weekLabel(g.week))}</span><span>${fx.home === g.userClub ? 'Home' : 'Away'}</span></div>
+        <div class="row between small muted"><span>${icon}${esc(E.weekLabel(g.week))}</span><span>${fx.home === g.userClub ? 'Home' : 'Away'}</span></div>
         <div class="fixture" style="margin:12px 0">
           <div class="side">${crest(h)}<b>${esc(h.name)}</b><span class="strength">Str ${E.clubStrength(h.id)} · ${clubPos(h)}</span>${formHtml(h.table.form)}</div>
           <div class="vs">vs</div>
           <div class="side">${crest(a)}<b>${esc(a.name)}</b><span class="strength">Str ${E.clubStrength(a.id)} · ${clubPos(a)}</span>${formHtml(a.table.form)}</div>
         </div>
-        ${cup ? `<p class="small" style="text-align:center;color:var(--accent2)">Knockout: a draw goes to penalties. Winning is worth ${M(g.cup.prizes[fx.round])}.</p>` : ''}
+        ${cup ? `<p class="small" style="text-align:center;color:var(--accent2)">Knockout: a draw goes to penalties. Winning is worth ${M(E.tiePrize(fx))}.</p>` : ''}
         <p class="small muted" style="text-align:center">${E.userClub().formation} · ${E.userClub().mentality} · ${lineup.length}/11 picked</p>
         <div class="btns"><button class="btn primary" data-a="play-live">▶ Play match</button><button class="btn" data-a="play-quick">⏩ Quick sim</button></div>
       </div>`;
@@ -159,12 +195,13 @@
     }).join('')}` : '';
     return top + offersHtml + lastHtml + `<h2>Inbox</h2><div class="list">${news || '<div class="news muted">No news yet.</div>'}</div>`;
   }
-  const clubPos = (c) => `${E.ordinal(E.position(c.id))} · ${esc(E.divName(c.div))}`;
-  // the fixtures a user cares about in a week: their division's games, or the cup ties
+  const clubPos = (c) => (c.div === 0 ? `${esc(c.country || 'Europe')}` : `${E.ordinal(E.position(c.id))} · ${esc(E.divName(c.div))}`);
+  // the fixtures that matter for a league in a week: its games, its country's cup ties, or European ties
   function relevantFixtures(w, div = E.userClub().div) {
-    const fx = E.fixturesForWeek(w);
-    return fx.filter((f) => f.comp === 'CUP' || f.div === div);
+    const ci = E.cupOfCountry(E.divCountry(div));
+    return E.fixturesForWeek(w).filter((f) => (f.comp === 'L' && f.div === div) || (f.comp === 'CUP' && f.cup === ci) || f.comp === 'CL');
   }
+  const sameComp = (a, b) => a.comp === b.comp && (a.comp !== 'L' || a.div === b.div) && (a.comp !== 'CUP' || a.cup === b.cup);
   function fxRow(f) {
     const h = E.club(f.home), a = E.club(f.away), me = G().userClub;
     const bold = (c) => (c.id === me ? 'font-weight:800;color:var(--accent)' : '');
@@ -400,21 +437,22 @@
   function viewLeague() {
     const g = G();
     const div = ui.leagueDiv || E.userClub().div;
-    const views = [['table', 'Table'], ['fixtures', 'Fixtures'], ['cup', 'Cup'], ['stats', 'Scorers']];
-    const toggle = `<div class="btns" style="margin-bottom:10px">${views.map(([k, l]) =>
+    const views = [['table', 'Table'], ['fixtures', 'Fixtures'], ['cup', 'Cup'], ...(E.clName() ? [['europe', 'Europe']] : []), ['stats', 'Scorers']];
+    const toggle = `<div class="chips" style="margin-bottom:4px">${views.map(([k, l]) =>
       `<button class="btn ${ui.leagueView === k ? 'on' : ''}" data-a="league-view" data-v="${k}">${l}</button>`).join('')}</div>`;
-    const divChips = `<div class="chips">${[1, 2].map((d) => `<button class="btn ${div === d ? 'on' : ''}" data-a="league-div" data-d="${d}">${esc(E.divName(d))}</button>`).join('')}</div>`;
+    const divChips = `<div class="chips">${E.leagueDivs().map((d) => `<button class="btn ${div === d ? 'on' : ''}" data-a="league-div" data-d="${d}">${esc(E.divName(d))}</button>`).join('')}</div>`;
     if (ui.leagueView === 'fixtures') {
       const w = ui.resultsWeek === null ? Math.min(g.week, E.totalWeeks() - 1) : ui.resultsWeek;
       const fx = relevantFixtures(w, div);
-      const cupWeek = g.calendar[w].type === 'cup';
-      return toggle + (cupWeek ? '' : divChips) + `<div class="row between" style="margin-bottom:8px">
+      const cupWeek = g.calendar[w].type !== 'league';
+      return toggle + divChips + `<div class="row between" style="margin-bottom:8px">
           <button class="btn" data-a="week" data-d="-1" ${w <= 0 ? 'disabled' : ''}>◀</button>
           <b>${esc(E.weekLabel(w, div))}</b>
           <button class="btn" data-a="week" data-d="1" ${w >= E.totalWeeks() - 1 ? 'disabled' : ''}>▶</button></div>
         <div class="list">${fx.map(fxRow).join('') || `<div class="news muted">${cupWeek ? 'The draw for this round has not been made yet.' : 'No fixtures.'}</div>`}</div>`;
     }
-    if (ui.leagueView === 'cup') return toggle + viewCup();
+    if (ui.leagueView === 'cup') return toggle + divChips + viewCup(div);
+    if (ui.leagueView === 'europe') return toggle + viewEurope();
     if (ui.leagueView === 'stats') {
       const ps = Object.values(g.players).filter((p) => p.club !== null && E.club(p.club).div === div && (p.goals || p.assists))
         .sort((a, b) => b.goals - a.goals || b.assists - a.assists).slice(0, 25);
@@ -423,15 +461,19 @@
         </table>${ps.length ? '' : '<div class="news muted">No goals yet.</div>'}</div><p class="small muted">Goals include cup matches.</p>`;
     }
     const table = E.standings(div);
-    const n = table.length, k = E.promotedCount();
-    const zone = (i) => (div === 1 && i >= n - k ? 'zone-down' : div === 2 && i < k ? 'zone-up' : '');
+    const n = table.length, z = E.zoneInfo(div), k = z.relegate;
+    const zone = (i) => (z.relegate && i >= n - z.relegate ? 'zone-down' : z.promote && i < z.promote ? 'zone-up' : z.cl && i < z.cl ? 'zone-cl' : '');
     const mine = E.userClub().div === div;
     const exp = E.expectedPosition();
     const note = !mine ? '' : `<p class="small muted">Board expectation: finish ${E.ordinal(exp)} or better.
-      ${div === 1 ? `The bottom ${k} are relegated to the ${esc(E.divName(2))}.` : `The top ${k} are promoted to the ${esc(E.divName(1))}.`}
-      ${[exp + 5 <= n ? `finishing ${E.ordinal(exp + 5)} or lower` : '', div === 1 && exp <= n - k - 3 ? 'being relegated' : '']
+      ${z.relegate ? `The bottom ${z.relegate} are relegated to the ${esc(E.divName(z.relegateTo))}.` : ''}
+      ${z.promote ? `The top ${z.promote} are promoted to the ${esc(E.divName(z.promoteTo))}.` : ''}
+      ${z.cl ? `The top ${z.cl} qualify for the ${esc(E.clName())}.` : ''}
+      ${[exp + 5 <= n ? `finishing ${E.ordinal(exp + 5)} or lower` : '', k && exp <= n - k - 3 ? 'being relegated' : '']
         .filter(Boolean).map((x, i, a) => (i ? ' or ' : '') + x).join('').replace(/^./, (c) => c.toUpperCase()).replace(/(.+)/, '$1 gets you sacked.')}
-      Winning the ${esc(E.cupName())} saves your job.</p>`;
+      Winning the ${esc(E.cupName())}${E.clName() ? ` or the ${esc(E.clName())}` : ''} saves your job.</p>`;
+    const keys = [z.cl ? `<span class="key cl"></span>${esc(E.clName())}` : '', z.promote ? '<span class="key up"></span>Promotion' : '',
+      z.relegate ? '<span class="key down"></span>Relegation' : ''].filter(Boolean).join(' &nbsp; ');
     return toggle + divChips + `<div class="list"><table>
       <tr><th>#</th><th class="l">Club</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th><th>Form</th></tr>
       ${table.map((c, i) => `<tr class="${c.id === g.userClub ? 'me' : ''} ${zone(i)}">
@@ -439,19 +481,53 @@
         <td>${c.table.p}</td><td>${c.table.w}</td><td>${c.table.d}</td><td>${c.table.l}</td>
         <td>${c.table.gf - c.table.ga > 0 ? '+' : ''}${c.table.gf - c.table.ga}</td><td><b>${c.table.pts}</b></td><td>${formHtml(c.table.form.slice(-3))}</td></tr>`).join('')}
       </table></div>
-      <p class="small">${div === 2 ? '<span class="key up"></span>Promotion' : '<span class="key down"></span>Relegation'} zone</p>${note}`;
+      ${keys ? `<p class="small">${keys}</p>` : ''}${note}`;
   }
-  function viewCup() {
+  function viewCup(div) {
     const g = G();
-    const status = g.cup.winner !== null ? `🏆 ${esc(E.club(g.cup.winner).name)} won the ${esc(E.cupName())}.`
-      : g.cup.alive.includes(g.userClub) ? `You're still in the ${esc(E.cupName())}.` : `You're out: ${esc(E.cupResult(g.userClub).toLowerCase())}.`;
-    const rounds = g.calendar.map((c, w) => ({ ...c, w })).filter((c) => c.type === 'cup');
-    return `<div class="card"><b>${esc(E.cupName())}</b><p class="small muted" style="margin:6px 0">
-        A knockout for all ${g.clubs.length} clubs.${g.cup.byes.length ? ` The ${g.cup.byes.length} top-rated sides skip the first round.` : ''}
-        A draw after 90 minutes goes to penalties.</p><p style="margin:0">${status}</p></div>
+    const ci = E.cupOfCountry(E.divCountry(div));
+    const cup = g.cups[ci];
+    if (!cup) return '<div class="news muted">No cup for this league.</div>';
+    const name = esc(cup.name);
+    const mine = ci === E.userCupIdx();
+    const status = cup.winner !== null ? `🏆 ${esc(E.club(cup.winner).name)} won the ${name}.`
+      : !mine ? '' : cup.alive.includes(g.userClub) ? `You're still in the ${name}.` : `You're out: ${esc(E.cupResult(g.userClub).toLowerCase())}.`;
+    const rounds = g.calendar.map((c, w) => ({ ...c, w })).filter((c) => c.type === 'cup' && c.k - cup.offset >= 0);
+    return `<div class="card"><b>${name}</b><p class="small muted" style="margin:6px 0">
+        A knockout for ${cup.clubs.length} ${esc(cup.country === 'Fictional' ? '' : cup.country)} clubs.${cup.byes.length ? ` The ${cup.byes.length} top-rated sides skip the first round.` : ''}
+        A draw after 90 minutes goes to penalties.</p>${status ? `<p style="margin:0">${status}</p>` : ''}</div>
       ${rounds.map((r) => {
-        const fx = E.fixturesForWeek(r.w);
-        return `<h2>${g.cup.rounds[r.round]} <span class="small muted">· week ${r.w + 1} · win ${M(g.cup.prizes[r.round])}</span></h2>
+        const round = r.k - cup.offset;
+        const fx = E.fixturesForWeek(r.w).filter((f) => f.comp === 'CUP' && f.cup === ci);
+        return `<h2>${cup.rounds[round]} <span class="small muted">· week ${r.w + 1} · win ${M(cup.prizes[round])}</span></h2>
+          <div class="list">${fx.map(fxRow).join('') || '<div class="news muted">Not drawn yet.</div>'}</div>`;
+      }).join('')}`;
+  }
+  function viewEurope() {
+    const g = G();
+    const name = esc(E.clName());
+    if (!g.cl) return `<div class="card"><b>${name}</b><p class="small muted">No ${name} this season.</p></div>`;
+    const st = E.clStandings();
+    const mineRes = E.clResult(g.userClub);
+    const status = g.cl.winner !== null ? `⭐ ${esc(E.club(g.cl.winner).name)} won the ${name}.`
+      : mineRes === null ? `You're not in the ${name} this season. Finish high enough in your league to qualify.` : mineRes === 'Still in' ? `You're still in the ${name}.` : `You're out: ${esc(mineRes.toLowerCase())}.`;
+    const zone = (i) => (i < 8 ? 'zone-up' : i < 24 ? 'zone-cl' : 'zone-down');
+    const koWeeks = g.calendar.map((c, w) => ({ ...c, w })).filter((c) => c.type === 'cl' && c.ko !== undefined);
+    return `<div class="card"><b>${name}</b><p class="small muted" style="margin:6px 0">
+        ${g.cl.clubs.length} clubs play 8 different opponents in one league phase. The top 8 go straight to the round of 16;
+        9th–24th meet in a knockout play-off. Knockout ties are single matches, with penalties after a draw (a simplification).</p>
+        <p style="margin:0">${status}</p></div>
+      <h2>League phase</h2>
+      <div class="list"><table>
+        <tr><th>#</th><th class="l">Club</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th></tr>
+        ${st.map((id, i) => { const c = E.club(id), t = g.cl.table[id]; return `<tr class="${id === g.userClub ? 'me' : ''} ${zone(i)}">
+          <td>${i + 1}</td><td class="l"><span class="dot" style="background:${c.color}"></span>${esc(c.name)}</td>
+          <td>${t.p}</td><td>${t.w}</td><td>${t.d}</td><td>${t.l}</td><td>${t.gf - t.ga > 0 ? '+' : ''}${t.gf - t.ga}</td><td><b>${t.pts}</b></td></tr>`; }).join('')}
+      </table></div>
+      <p class="small"><span class="key up"></span>Round of 16 &nbsp; <span class="key cl"></span>Knockout play-off &nbsp; <span class="key down"></span>Eliminated</p>
+      ${koWeeks.map((r) => {
+        const fx = E.fixturesForWeek(r.w).filter((f) => f.comp === 'CL');
+        return `<h2>${E.CL_KO_ROUNDS[r.ko]} <span class="small muted">· week ${r.w + 1}</span></h2>
           <div class="list">${fx.map(fxRow).join('') || '<div class="news muted">Not drawn yet.</div>'}</div>`;
       }).join('')}`;
   }
@@ -461,7 +537,9 @@
     const g = G();
     const q = ui.marketQuery.toLowerCase();
     const wkOnly = ui.marketPos === 'WK';
-    const pool = Object.values(g.players).filter((p) => p.club !== g.userClub
+    const leagueOk = (p) => ui.marketLeague === 'ALL' || (ui.marketLeague === 'FREE' ? p.club === null
+      : p.club !== null && String(E.club(p.club).div) === ui.marketLeague);
+    const pool = Object.values(g.players).filter((p) => p.club !== g.userClub && !p.academy && leagueOk(p)
       && (wkOnly ? E.isWonderkid(p) : ui.marketPos === 'ALL' || p.pos === ui.marketPos)
       && (!ui.marketMax || E.askingPrice(p) <= ui.marketMax)
       && (!q || p.name.toLowerCase().includes(q)))
@@ -472,6 +550,10 @@
       ${wkOnly ? `<p class="small muted">Every player aged ${E.WK_AGE} or under with elite potential. Their exact potential and personality are only rumours until you pay for a scout report. Clubs charge a premium for them, and big clubs will try to snatch them first.</p>` : ''}
       <div class="row" style="margin-bottom:10px">
         <input class="grow" id="mq" placeholder="Search name…" value="${esc(ui.marketQuery)}">
+        ${E.leagueDivs().length > 2 || g.clubs.some((c) => c.div === 0) ? `<select id="mleague">
+          <option value="ALL">All leagues</option>${E.leagueDivs().map((d) => `<option value="${d}" ${ui.marketLeague === String(d) ? 'selected' : ''}>${esc(E.divName(d))}</option>`).join('')}
+          ${g.clubs.some((c) => c.div === 0) ? `<option value="0" ${ui.marketLeague === '0' ? 'selected' : ''}>Rest of Europe</option>` : ''}
+          <option value="FREE" ${ui.marketLeague === 'FREE' ? 'selected' : ''}>Free agents</option></select>` : ''}
         <select id="mmax">${maxes.map(([v, l]) => `<option value="${v}" ${ui.marketMax === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
       </div>
       <p class="small muted">Squad ${E.userClub().squad.length}/${E.MAX_SQUAD} · Budget ${M(E.userClub().budget)}</p>
@@ -495,7 +577,7 @@
       <div class="btns">${Object.keys(E.INTENSITY).map((k) => `<button class="btn ${g.training === k ? 'on' : ''}" data-a="training" data-k="${k}">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div>
       <p class="small muted">Harder training develops young players faster, but players recover less fitness and get injured more.</p>
       <h2>History</h2>
-      <div class="list">${g.history.length ? g.history.map((h) => `<div class="item"><div class="grow">${E.seasonName(h.season)}<div class="small muted">Cup: ${esc(h.cup)}</div></div>
+      <div class="list">${g.history.length ? g.history.map((h) => `<div class="item"><div class="grow">${E.seasonName(h.season)}<div class="small muted">Cup: ${esc(h.cup)}${h.cl ? ` · Europe: ${esc(h.cl)}` : ''}</div></div>
         <b>${E.ordinal(h.position)} · ${esc(E.divName(h.division))}${h.move === 'up' ? ' ⬆️' : h.move === 'down' ? ' ⬇️' : ''}</b><span class="muted small">${h.points} pts</span></div>`).join('') : '<div class="news muted">Your first season is under way.</div>'}</div>
       ${(g.awards || []).length ? `<h2>🏅 Golden Boy winners</h2><div class="list">${g.awards.map((a) => `<div class="item ${a.mine ? 'sel' : ''}">
         <div class="grow">${E.seasonName(a.season)}<div class="small muted">${esc(a.club)}</div></div><b>${esc(a.name)}</b><span class="muted small">${a.ovr}</span></div>`).join('')}</div>` : ''}
@@ -595,13 +677,14 @@
       <p class="small muted" style="text-align:center">${scorers.map(esc).join(' · ') || 'No goals'}</p>
       ${m.pens ? `<p style="text-align:center;margin-top:0"><b>${m.pens[0]} - ${m.pens[1]} on penalties</b></p>` : ''}
       <b class="small muted">Other results</b>
-      <div class="list">${others.filter((f) => f.comp === m.fx.comp && f.div === m.fx.div).map(fxRow).join('')}</div>
+      <div class="list">${others.filter((f) => sameComp(f, m.fx)).map(fxRow).join('')}</div>
       <button class="btn primary block" data-a="next-week">Continue</button>`);
     ui.match = null;
   }
   function skipWeek() {
     const others = E.playOtherMatches(null);
-    const shown = others.filter((f) => f.comp === 'CUP' || f.div === E.userClub().div);
+    const ci = E.userCupIdx();
+    const shown = others.filter((f) => (f.comp === 'L' && f.div === E.userClub().div) || (f.comp === 'CUP' && f.cup === ci) || f.comp === 'CL');
     openModal(`<h2 style="margin-top:0">${esc(E.weekLabel(G().week))}</h2>
       <div class="list">${shown.map(fxRow).join('') || '<div class="news muted">No matches.</div>'}</div>
       <button class="btn primary block" data-a="next-week">Continue</button>`);
@@ -621,21 +704,23 @@
     save();
     openModal(`<h2 style="margin-top:0">${E.seasonName(s.season)} review</h2>
       <div class="kv">
-        <span>${esc(E.divName(1))} champions</span><span>🏆 ${esc(s.champion)}</span>
-        <span>${esc(E.divName(2))} champions</span><span>${esc(s.d2Champion)}</span>
-        <span>${esc(E.cupName())}</span><span>🏆 ${esc(s.cupWinner)}</span>
+        ${s.champions.map((c) => `<span>${esc(c.league)} champions</span><span>🏆 ${esc(c.club)}</span>`).join('')}
+        ${s.clName && s.clWinner ? `<span>${esc(s.clName)}</span><span>⭐ ${esc(s.clWinner)}</span>` : ''}
+        <span>${esc(s.cupName)}</span><span>🏆 ${esc(s.cupWinner)}</span>
         <span>Your finish</span><span>${E.ordinal(s.position)} in the ${esc(E.divName(s.division))} (${s.points} pts)</span>
         <span>Your cup run</span><span>${esc(s.cup)}</span>
+        ${s.cl ? `<span>Your ${esc(s.clName)} run</span><span>${esc(s.cl)}</span>` : ''}
         <span>Board target</span><span>${E.ordinal(s.expected)}</span>
         <span>Prize money</span><span>${M(s.prize)}</span>
         <span>Golden boot</span><span>${esc(s.topScorer)}</span>
       </div>
       ${s.goldenBoy ? `<div class="wkcard">🏅 <b>Golden Boy:</b> ${esc(s.goldenBoy)}${s.goldenBoyMine ? ' <b>(your player!)</b> Your club\'s reputation grows.' : ''}
         ${s.nominees.length ? `<div class="small muted">Also nominated: ${s.nominees.map(esc).join(', ')}</div>` : ''}</div>` : ''}
-      ${s.move === 'up' ? `<p style="color:var(--accent);font-weight:800">⬆️ PROMOTED TO THE ${esc(E.divName(1).toUpperCase())}!</p>` : ''}
-      ${s.move === 'down' ? `<p style="color:var(--bad);font-weight:800">⬇️ Relegated to the ${esc(E.divName(2))}.</p>` : ''}
+      ${s.move === 'up' ? `<p style="color:var(--accent);font-weight:800">⬆️ PROMOTED TO THE ${esc(E.divName(E.userClub().div).toUpperCase())}!</p>` : ''}
+      ${s.move === 'down' ? `<p style="color:var(--bad);font-weight:800">⬇️ Relegated to the ${esc(E.divName(E.userClub().div))}.</p>` : ''}
+      ${s.qualified ? `<p style="color:var(--accent2);font-weight:800">⭐ Qualified for next season's ${esc(s.clName)}!</p>` : ''}
       <p><b>${esc(s.verdict)}</b></p>
-      <p class="small muted">⬆️ Up: ${s.promoted.map(esc).join(', ')} · ⬇️ Down: ${s.relegated.map(esc).join(', ')}</p>
+      ${s.promoted.length ? `<p class="small muted">⬆️ Up: ${s.promoted.map(esc).join(', ')} · ⬇️ Down: ${s.relegated.map(esc).join(', ')}</p>` : ''}
       ${s.retired.length ? `<p class="small"><b>Retired:</b> ${s.retired.map(esc).join(', ')}</p>` : ''}
       ${s.departed.length ? `<p class="small"><b>Contracts expired (left on a free):</b> ${s.departed.map(esc).join(', ')}</p>` : ''}
       ${s.graduatesLeft.length ? `<p class="small"><b>Left the academy:</b> ${s.graduatesLeft.map(esc).join(', ')}</p>` : ''}
@@ -651,7 +736,8 @@
     const a = t.dataset.a, d = t.dataset;
     switch (a) {
       case 'continue':
-        try { E.load(localStorage.getItem(SAVE_KEY)); ui.leagueDiv = null; render(); } catch (err) { toast('Save could not be loaded.'); renderStart(true); }
+        unpack(localStorage.getItem(SAVE_KEY)).then((json) => { E.load(json); ui.leagueDiv = null; render(); })
+          .catch(() => { toast('Save could not be loaded.'); renderStart(true); });
         break;
       case 'new-career': {
         const reset = () => { try { localStorage.removeItem(SAVE_KEY); } catch (err) { /* ignore */ } closeModal(); renderStart(true); };
@@ -659,7 +745,8 @@
         else reset();
         break;
       }
-      case 'dataset': ui.dataset = d.id; renderStart(true); window.scrollTo(0, 0); break;
+      case 'dataset': ui.dataset = d.id; ui.startCountry = null; renderStart(true); window.scrollTo(0, 0); break;
+      case 'start-country': ui.startCountry = d.c; renderStart(true); break;
       case 'ask-yes': { const c = pendingConfirm; pendingConfirm = null; closeModal(); if (c && c.onYes) c.onYes(); break; }
       case 'ask-no': { const c = pendingConfirm; pendingConfirm = null; closeModal(); if (c && c.onNo) c.onNo(); break; }
       case 'pick-club': {
@@ -791,6 +878,7 @@
   });
   document.addEventListener('change', (e) => {
     if (e.target.id === 'mmax') { ui.marketMax = +e.target.value; render(); }
+    if (e.target.id === 'mleague') { ui.marketLeague = e.target.value; render(); }
   });
 
   renderStart();

@@ -4,14 +4,18 @@ A football management game that runs in the browser. It has no dependencies and 
 
 Take charge of a club and manage the squad, tactics, transfers and finances across as many seasons as the board allows. There are two game worlds:
 
-- **England 2025/26:** the real Premier League (20 clubs) and Championship (24 clubs), with 761 real players as of the start of the 2025/26 season. Three clubs go up and three go down each season. The season is 38 or 46 matchdays plus a 6-round cup.
+- **Europe 2025/26:** 134 real clubs and about 2,400 real players as of the start of the 2025/26 season. It covers the Premier League and Championship (3 up, 3 down), La Liga, Serie A, Ligue 1 and the Bundesliga, all running at the same time. Each country has its own cup (FA Cup, Copa del Rey, Coppa Italia, Coupe de France, DFB-Pokal).
+  - **Champions League:** the real 36-club 2025/26 field, including 14 clubs from outside these leagues, such as Benfica, PSV and Galatasaray, which play only in Europe. It has an 8-game league phase, then a knockout play-off, round of 16, quarter-finals, semi-finals and final. Knockout ties are single matches, a simplification.
+  - **Qualification:** from the second season, the top 5 in England and Spain and the top 4 in Italy, Germany and France qualify, along with the same 14 other clubs.
+  - **Simplifications:** only England has a second tier, so La Liga, Serie A, Ligue 1 and the Bundesliga have no relegation. A season is 65 weeks.
+- **England only:** just the Premier League and Championship.
 - **Fictional:** 24 invented clubs in two divisions of 12, with randomly generated players.
 
-> The real-football data in `data/england.js` is an unofficial, best-effort snapshot. Squads may be out of date (transfers after summer 2025 aren't included), ages are approximate, and the ratings are editorial estimates rather than official figures. Partially known Championship squads are topped up with generated players. No club crests or logos are used, only names and kit colours. Edit the file to update squads or ratings: each player is `"Name|POS|age|rating|potential"`.
+> The real-football data in `data/` (`england.js`, `spain.js`, `italy.js`, `france.js`, `germany.js`, `europe.js`) is an unofficial, best-effort snapshot. Squads may be out of date (transfers after summer 2025 aren't included), ages are approximate, and the ratings are editorial estimates rather than official figures. Partially known squads, mostly smaller clubs, are topped up with generated players. No club crests or logos are used, only names and kit colours. Edit the file to update squads or ratings: each player is `"Name|POS|age|rating|potential"`.
 
 ## Play
 
-Open `index.html` in a browser, or serve the folder (for example `python3 -m http.server`) and visit it. Progress saves automatically to the browser's local storage after every matchday.
+Open `index.html` in a browser, or serve the folder (for example `python3 -m http.server`) and visit it. Progress saves automatically to the browser's local storage after every matchday. Saves are gzip-compressed where the browser supports it.
 
 ## Features
 
@@ -30,7 +34,7 @@ Open `index.html` in a browser, or serve the folder (for example `python3 -m htt
 
 ## Code
 
-- `data/england.js`: the real-football data pack. Other packs can be added the same way, by registering on `TM_DATASETS`.
+- `data/*.js`: the real-football country packs, registered on `TM_COUNTRIES`, and the Champions League pack, `TM_CONTINENTAL`. The engine builds the game worlds from whichever packs are loaded.
 - `js/engine.js`: the game rules and simulation. It doesn't touch the DOM and runs under Node.
 - `js/ui.js`: rendering and input.
-- `tests/sim.test.js`: a headless smoke test that plays 5 full seasons and checks the table, the cup and promotion/relegation. Run it with `node tests/sim.test.js [clubIndex] [seed] [fictional|england]`.
+- `tests/sim.test.js`: a headless smoke test that plays 5 full seasons and checks the table, the cup and promotion/relegation. Run it with `node tests/sim.test.js [clubIndex] [seed] [fictional|england|europe]`.

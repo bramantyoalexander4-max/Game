@@ -158,3 +158,5 @@ tr.zone-down td:first-child { box-shadow: inset 3px 0 0 var(--bad); }
 .wk { font-size: 13px; }
 .wkcard { background: linear-gradient(90deg, rgba(255,213,79,.18), rgba(255,213,79,.04)); border: 1px solid rgba(255,213,79,.5);
   border-radius: 10px; padding: 8px 10px; margin: 10px 0; font-size: 14px; }
+tr.zone-cl td:first-child { box-shadow: inset 3px 0 0 var(--accent2); }
+.key.cl { background: var(--accent2); }

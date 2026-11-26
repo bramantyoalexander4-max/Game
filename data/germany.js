@@ -1,0 +1,145 @@
+/* Real-football data pack: Germany (Bundesliga), start of the 2025/26 season.
+ * Ages as of August 2025; ratings are editorial estimates. Format: "Name|POS|age|ovr|pot".
+ * Smaller clubs' lists are partial and get topped up with generated players. */
+(function (root) {
+  'use strict';
+  const C = (root.TM_COUNTRIES = root.TM_COUNTRIES || {});
+  C.germany = {
+    country: 'Germany',
+    leagues: [{ key: 'GER1', name: 'Bundesliga', tier: 1 }],
+    promotions: [],
+    cup: 'DFB-Pokal',
+    clSlots: { GER1: 4 },
+    clubs: [
+      { name: 'Bayern Munich', short: 'FCB', color: '#DC052D', rep: 90, league: 'GER1', players: [
+        'Manuel Neuer|GK|39|85', 'Jonas Urbig|GK|22|74|82', 'Sven Ulreich|GK|37|70',
+        'Dayot Upamecano|DF|26|85', 'Jonathan Tah|DF|29|84', 'Kim Min-jae|DF|28|82', 'Hiroki Ito|DF|26|78',
+        'Alphonso Davies|DF|24|84', 'Josip Stanišić|DF|25|79', 'Konrad Laimer|DF|28|80', 'Sacha Boey|DF|25|76',
+        'Raphaël Guerreiro|DF|31|78',
+        'Joshua Kimmich|MF|30|88', 'Leon Goretzka|MF|30|80', 'Aleksandar Pavlović|MF|21|80|87', 'Jamal Musiala|MF|22|88|91',
+        'Tom Bischof|MF|20|75|83', 'Lennart Karl|MF|17|72|87',
+        'Harry Kane|FW|32|90', 'Michael Olise|FW|23|86|89', 'Luis Díaz|FW|28|85', 'Serge Gnabry|FW|30|80',
+        'Nicolas Jackson|FW|24|79'] },
+      { name: 'Bayer Leverkusen', short: 'B04', color: '#E32221', rep: 83, league: 'GER1', players: [
+        'Mark Flekken|GK|32|77', 'Janis Blaswich|GK|34|72',
+        'Edmond Tapsoba|DF|26|80', 'Jarell Quansah|DF|22|77|82', 'Alejandro Grimaldo|DF|29|83', 'Arthur|DF|22|73',
+        'Lucas Vázquez|DF|34|75', 'Axel Tape|DF|18|66|78', 'Jeanuël Belocian|DF|20|70|78',
+        'Robert Andrich|MF|30|78', 'Exequiel Palacios|MF|26|80', 'Ezequiel Fernández|MF|23|76|81', 'Aleix García|MF|28|78',
+        'Malik Tillman|MF|23|79|84', 'Ibrahim Maza|MF|19|74|84', 'Jonas Hofmann|MF|33|76',
+        'Martin Terrier|FW|28|76', 'Ernest Poku|FW|21|74|80', 'Patrik Schick|FW|29|81', 'Christian Kofane|FW|19|70|82'] },
+      { name: 'Borussia Dortmund', short: 'BVB', color: '#E0C400', rep: 83, league: 'GER1', players: [
+        'Gregor Kobel|GK|27|85', 'Alexander Meyer|GK|34|70',
+        'Nico Schlotterbeck|DF|25|84', 'Waldemar Anton|DF|28|80', 'Niklas Süle|DF|29|78', 'Ramy Bensebaini|DF|30|77',
+        'Julian Ryerson|DF|27|78', 'Yan Couto|DF|23|77|81', 'Daniel Svensson|DF|23|76|80', 'Emre Can|DF|31|77',
+        'Marcel Sabitzer|MF|31|79', 'Pascal Groß|MF|34|78', 'Felix Nmecha|MF|24|79|82', 'Jobe Bellingham|MF|19|76|86',
+        'Carney Chukwuemeka|MF|21|74|82', 'Julian Brandt|MF|29|81',
+        'Karim Adeyemi|FW|23|80|84', 'Maximilian Beier|FW|22|77|82', 'Serhou Guirassy|FW|29|84', 'Fábio Silva|FW|23|74'] },
+      { name: 'RB Leipzig', short: 'RBL', color: '#DD0741', rep: 79, league: 'GER1', players: [
+        'Péter Gulácsi|GK|35|77', 'Maarten Vandevoordt|GK|23|77|82',
+        'Willi Orbán|DF|32|79', 'Castello Lukeba|DF|22|80|85', 'El Chadaille Bitshiabu|DF|20|72|80', 'David Raum|DF|27|79',
+        'Ridle Baku|DF|27|76', 'Lukas Klostermann|DF|29|75', 'Kosta Nedeljković|DF|19|70|80',
+        'Xaver Schlager|MF|27|79', 'Nicolas Seiwald|MF|24|77', 'Christoph Baumgartner|MF|26|78', 'Kevin Kampl|MF|34|73',
+        'Assan Ouédraogo|MF|19|74|85', 'Ezechiel Banzuzi|MF|20|72|80', 'Yan Diomande|FW|18|72|85',
+        'Antonio Nusa|FW|20|77|85', 'Johan Bakayoko|FW|22|77|82', 'Romulo|FW|23|74', 'Conrad Harder|FW|20|72|80'] },
+      { name: 'Eintracht Frankfurt', short: 'SGE', color: '#E1000F', rep: 79, league: 'GER1', players: [
+        'Kauã Santos|GK|22|75|82', 'Michael Zetterer|GK|30|73',
+        'Robin Koch|DF|29|79', 'Arthur Theate|DF|25|78', 'Nathaniel Brown|DF|22|76|82', 'Rasmus Kristensen|DF|28|76',
+        'Aurèle Amenda|DF|21|72|79', 'Nnamdi Collins|DF|21|72|80', 'Timothy Chandler|DF|35|68',
+        'Hugo Larsson|MF|21|78|84', 'Ellyes Skhiri|MF|30|77', 'Mario Götze|MF|33|76', 'Fares Chaïbi|MF|22|76|81',
+        'Can Uzun|MF|19|76|86', 'Oscar Højlund|MF|20|72|80', 'Ansgar Knauff|FW|23|74', 'Ritsu Dōan|FW|27|78',
+        'Jonathan Burkardt|FW|25|79', 'Elye Wahi|FW|22|74|80', 'Michy Batshuayi|FW|31|72', 'Jean-Mattéo Bahoya|FW|20|72|80'] },
+      { name: 'VfB Stuttgart', short: 'VFB', color: '#E32219', rep: 78, league: 'GER1', players: [
+        'Alexander Nübel|GK|28|80', 'Fabian Bredlow|GK|30|70',
+        'Jeff Chabot|DF|27|76', 'Finn Jeltsch|DF|19|74|83', 'Ramon Hendriks|DF|23|74', 'Maximilian Mittelstädt|DF|28|78',
+        'Josha Vagnoman|DF|24|74', 'Pascal Stenzel|DF|29|72', 'Lorenz Assignon|DF|25|72', 'Luca Jaquez|DF|22|70',
+        'Angelo Stiller|MF|24|82|84', 'Atakan Karazor|MF|28|75', 'Chema Andrés|MF|20|72|80', 'Bilal El Khannouss|MF|21|77|83',
+        'Nikolas Nartey|MF|25|72', 'Chris Führich|FW|27|77', 'Jamie Leweling|FW|24|77', 'Badredine Bouanani|FW|21|70|78',
+        'Deniz Undav|FW|29|79', 'Ermedin Demirović|FW|27|77', 'Tiago Tomás|FW|23|73'] },
+      { name: 'SC Freiburg', short: 'SCF', color: '#2B2B2B', rep: 75, league: 'GER1', players: [
+        'Noah Atubolu|GK|23|77|82', 'Florian Müller|GK|27|70',
+        'Matthias Ginter|DF|31|78', 'Philipp Lienhart|DF|29|76', 'Max Rosenfelder|DF|22|72|78', 'Christian Günter|DF|32|74',
+        'Jordy Makengo|DF|24|71', 'Lukas Kübler|DF|32|72', 'Philipp Treu|DF|24|72', 'Bruno Ogbus|DF|20|68',
+        'Maximilian Eggestein|MF|28|75', 'Patrick Osterhage|MF|25|73', 'Nicolas Höfler|MF|35|71', 'Johan Manzambi|MF|19|72|83',
+        'Vincenzo Grifo|FW|32|76', 'Yuito Suzuki|MF|23|74', 'Jan-Niklas Beste|FW|26|75', 'Derry Scherhant|FW|22|70',
+        'Lucas Höler|FW|31|73', 'Junior Adamu|FW|24|72', 'Igor Matanović|FW|22|72', 'Eren Dinkçi|FW|23|72'] },
+      { name: 'Mainz 05', short: 'M05', color: '#C3141E', rep: 73, league: 'GER1', players: [
+        'Robin Zentner|GK|30|75', 'Daniel Batz|GK|34|70',
+        'Danny da Costa|DF|32|72', 'Dominik Kohr|DF|31|72', 'Stefan Bell|DF|33|72', 'Andreas Hanche-Olsen|DF|28|73',
+        'Phillipp Mwene|DF|31|70', 'Anthony Caci|DF|28|73', 'Kacper Potulski|DF|18|66|78', 'Silvan Widmer|DF|32|72',
+        'Nadiem Amiri|MF|28|78', 'Kaishu Sano|MF|24|76', 'Lee Jae-sung|MF|33|75', 'Paul Nebel|MF|22|73|79',
+        'Sota Kawasaki|MF|24|70',
+        'Benedict Hollerbach|FW|24|73', 'Arnaud Nordin|FW|27|72', 'Armindo Sieb|FW|22|71', 'Nelson Weiper|FW|20|70|78'] },
+      { name: 'Werder Bremen', short: 'SVW', color: '#1D9053', rep: 72, league: 'GER1', players: [
+        'Mio Backhaus|GK|21|74|81',
+        'Marco Friedl|DF|27|75', 'Niklas Stark|DF|30|74', 'Amos Pieper|DF|27|73', 'Mitchell Weiser|DF|31|75',
+        'Felix Agu|DF|25|72', 'Isaac Schmidt|DF|25|71', 'Karim Coulibaly|DF|18|68|80',
+        'Senne Lynen|MF|26|75', 'Jens Stage|MF|28|76', 'Romano Schmid|MF|25|77', 'Leonardo Bittencourt|MF|31|72',
+        'Cameron Puertas|MF|27|73', 'Olivier Deman|DF|25|70', 'Isak Hansen-Aarøen|MF|20|70|79',
+        'Justin Njinmah|FW|25|73', 'Keke Topp|FW|21|70|78', 'Victor Boniface|FW|24|77', 'Samuel Mbangula|FW|21|72|79'] },
+      { name: 'Borussia Mönchengladbach', short: 'BMG', color: '#1F1F1F', rep: 72, league: 'GER1', players: [
+        'Moritz Nicolas|GK|28|75', 'Jonas Omlin|GK|31|74',
+        'Nico Elvedi|DF|28|76', 'Ko Itakura|DF|28|76', 'Marvin Friedrich|DF|29|72', 'Joe Scally|DF|22|74|79',
+        'Lukas Ullrich|DF|21|70|77', 'Fabio Chiarodia|DF|20|70|78', 'Kevin Diks|DF|28|74',
+        'Julian Weigl|MF|29|76', 'Rocco Reitz|MF|23|76|81', 'Philipp Sander|MF|27|72', 'Florian Neuhaus|MF|28|74',
+        'Kevin Stöger|MF|31|76', 'Franck Honorat|FW|28|75', 'Nathan Ngoumou|FW|25|72', 'Robin Hack|FW|26|74',
+        'Tim Kleindienst|FW|30|77', 'Haris Tabaković|FW|31|71', 'Shuto Machino|FW|26|73'] },
+      { name: 'VfL Wolfsburg', short: 'WOB', color: '#65B32E', rep: 72, league: 'GER1', players: [
+        'Kamil Grabara|GK|26|77', 'Marius Müller|GK|32|70',
+        'Denis Vavro|DF|29|74', 'Konstantinos Koulierakis|DF|21|75|81', 'Moritz Jenz|DF|26|73', 'Joakim Mæhle|DF|28|75',
+        'Rogério|DF|27|72', 'Kilian Fischer|DF|24|72',
+        'Maximilian Arnold|MF|31|76', 'Mattias Svanberg|MF|26|75', 'Patrick Wimmer|MF|24|74', 'Christian Eriksen|MF|33|74',
+        'Yannick Gerhardt|MF|31|72', 'Lovro Majer|MF|27|75', 'Bence Dárdai|MF|19|70|79',
+        'Mohamed Amoura|FW|25|78', 'Jonas Wind|FW|26|75', 'Dženan Pejčinović|FW|20|69|78', 'Andreas Skov Olsen|FW|25|75'] },
+      { name: 'TSG Hoffenheim', short: 'TSG', color: '#1C63B7', rep: 69, league: 'GER1', players: [
+        'Oliver Baumann|GK|35|78', 'Luca Philipp|GK|24|66',
+        'Ozan Kabak|DF|25|76', 'Albian Hajdari|DF|22|73|78', 'Kevin Akpoguma|DF|30|72', 'Robin Hranáč|DF|25|73',
+        'Valentin Gendrey|DF|25|72', 'Bernardo|DF|30|72', 'Vladimír Coufal|DF|33|73', 'Koki Machida|DF|27|72',
+        'Grischa Prömel|MF|30|73', 'Dennis Geiger|MF|27|71', 'Wouter Burger|MF|24|74', 'Leon Avdullahu|MF|21|72|79',
+        'Andrej Kramarić|FW|34|77', 'Fisnik Asllani|FW|23|74', 'Alexander Prass|MF|24|74', 'Bazoumana Touré|FW|19|72|82',
+        'Muhammed Damar|MF|21|70|78', 'Tim Lemperle|FW|23|73', 'Adam Hložek|FW|23|74', 'Ihlas Bebou|FW|31|70'] },
+      { name: 'FC Augsburg', short: 'FCA', color: '#BA3733', rep: 69, league: 'GER1', players: [
+        'Finn Dahmen|GK|27|75', 'Nediljko Labrović|GK|26|71',
+        'Jeffrey Gouweleeuw|DF|34|72', 'Cédric Zesiger|DF|27|72', 'Keven Schlotterbeck|DF|28|71', 'Dimitrios Giannoulis|DF|30|72',
+        'Marius Wolf|DF|30|71', 'Chrislain Matsima|DF|23|71', 'Noahkai Banks|DF|18|68|78', 'Robin Fellhauer|DF|27|69',
+        'Elvis Rexhbeçaj|MF|27|72', 'Kristijan Jakić|MF|28|72', 'Fredrik Jensen|MF|28|71', 'Mert Kömür|MF|19|68|78',
+        'Alexis Claude-Maurice|MF|27|73', 'Han-Noah Massengo|MF|23|70', 'Anton Kade|FW|21|70|78',
+        'Samuel Essende|FW|27|72', 'Phillip Tietz|FW|28|72', 'Steve Mounié|FW|31|69'] },
+      { name: 'Union Berlin', short: 'FCU', color: '#EB1923', rep: 69, league: 'GER1', players: [
+        'Frederik Rønnow|GK|33|74', 'Carl Klaus|GK|31|66',
+        'Diogo Leite|DF|26|74', 'Danilho Doekhi|DF|27|75', 'Leopold Querfeld|DF|21|74|80', 'Christopher Trimmel|DF|38|68',
+        'Josip Juranović|DF|30|73', 'Tom Rothe|DF|20|72|79', 'Derrick Köhn|DF|26|70', 'Stanley Nsoki|DF|26|70',
+        'Rani Khedira|MF|31|74', 'Aljoscha Kemlein|MF|21|71|78', 'András Schäfer|MF|26|72', 'Alex Král|MF|27|72',
+        'Janik Haberer|MF|31|70', 'László Bénes|MF|28|72',
+        'Andrej Ilić|FW|25|73', 'Tim Skarke|FW|28|70', 'Oliver Burke|FW|28|72', 'Ilyas Ansah|FW|20|70|78',
+        'Jeong Woo-yeong|FW|26|71', 'Marin Ljubičić|FW|23|70'] },
+      { name: 'FC St. Pauli', short: 'STP', color: '#6E4B3C', rep: 66, league: 'GER1', players: [
+        'Nikola Vasilj|GK|29|74', 'Ben Voll|GK|24|68',
+        'Hauke Wahl|DF|31|72', 'Eric Smith|DF|28|73', 'Karol Mets|DF|32|70', 'Adam Dźwigała|DF|29|69',
+        'Lars Ritzka|DF|27|68', 'Manolis Saliakas|DF|29|71', 'Arkadiusz Pyrka|DF|23|70', 'Louis Oppie|DF|23|68',
+        'Jackson Irvine|MF|32|73', 'Carlo Boukhalfa|MF|26|70', 'Connor Metcalfe|MF|25|70', 'James Sands|MF|25|71',
+        'Joel Chima Fujita|MF|23|71', 'Mathias Pereira Lage|FW|28|71', 'Danel Sinani|MF|28|71',
+        'Andréas Hountondji|FW|23|70', 'Martijn Kaars|FW|26|70', 'Ricky-Jade Jones|FW|22|68', 'Abdoulie Ceesay|FW|21|68'] },
+      { name: '1. FC Köln', short: 'KOE', color: '#ED1C24', rep: 66, league: 'GER1', players: [
+        'Marvin Schwäbe|GK|30|73', 'Ron-Robert Zieler|GK|36|66',
+        'Timo Hübers|DF|29|72', 'Joel Schmied|DF|27|70', 'Dominique Heintz|DF|31|70', 'Rav van den Berg|DF|21|70|77',
+        'Kristoffer Lund|DF|23|70', 'Sebastian Sebulonsen|DF|25|70', 'Leart Paçarada|DF|30|68', 'Cenk Özkacar|DF|24|70',
+        'Eric Martel|MF|23|74', 'Isak Bergmann Jóhannesson|MF|22|72|78', 'Tom Krauß|MF|24|71', 'Dejan Ljubičić|MF|27|72',
+        'Florian Kainz|MF|32|71', 'Jan Thielmann|FW|23|72', 'Linton Maina|FW|26|72', 'Said El Mala|FW|18|72|85',
+        'Jakub Kamiński|FW|23|73', 'Luca Waldschmidt|FW|29|71', 'Ragnar Ache|FW|27|72', 'Marius Bülter|FW|32|71'] },
+      { name: 'Hamburger SV', short: 'HSV', color: '#0A3E8E', rep: 66, league: 'GER1', players: [
+        'Daniel Heuer Fernandes|GK|32|72', 'Daniel Peretz|GK|25|70',
+        'Sebastian Schonlau|DF|31|72', 'Dennis Hadžikadunić|DF|26|71', 'Luka Vušković|DF|18|74|86', 'Jordan Torunarigha|DF|27|71',
+        'William Mikelbrencis|DF|21|69|77', 'Miro Muheim|DF|27|71', 'Giorgi Gocholeishvili|DF|24|71', 'Warmed Omari|DF|25|70',
+        'Jonas Meffert|MF|30|71', 'Nicolai Remberg|MF|24|70', 'Albert Sambi Lokonga|MF|25|73', 'Ludovit Reis|MF|25|71',
+        'Fábio Vieira|MF|25|74', 'Jean-Luc Dompé|FW|29|71', 'Emir Sahiti|FW|26|70', 'Alexander Røssing-Lelesiit|FW|18|67|80',
+        'Ransford Königsdörffer|FW|24|71', 'Robert Glatzel|FW|31|72', 'Yussuf Poulsen|FW|31|71', 'Rayan Philippe|FW|25|70'] },
+      { name: '1. FC Heidenheim', short: 'FCH', color: '#C8102E', rep: 63, league: 'GER1', players: [
+        'Kevin Müller|GK|34|72', 'Diant Ramaj|GK|23|70',
+        'Patrick Mainka|DF|31|72', 'Benedikt Gimber|DF|28|70', 'Omar Traoré|DF|27|70', 'Jonas Föhrenbach|DF|29|68',
+        'Marnon Busch|DF|30|68', 'Tim Siersleben|DF|25|68', 'Hennes Behrens|DF|20|66',
+        'Jan Schöppner|MF|26|70', 'Lennard Maloney|MF|25|70', 'Niklas Dorsch|MF|27|71', 'Adrian Beck|MF|28|71',
+        'Mathias Honsak|FW|28|70', 'Sirlord Conteh|FW|28|69', 'Arijon Ibrahimović|MF|19|68|78',
+        'Marvin Pieringer|FW|26|70', 'Budu Zivzivadze|FW|31|69', 'Stefan Schimmer|FW|31|66'] },
+    ],
+  };
+})(typeof window !== 'undefined' ? window : globalThis);

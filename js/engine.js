@@ -2,7 +2,7 @@
 (function (root) {
   'use strict';
 
-  const SAVE_VERSION = 5;
+  const SAVE_VERSION = 6;
   let G = null; // current game state
 
   // ---------- random ----------
@@ -89,26 +89,71 @@
   const DIV2_PRIZE_SHARE = 0.3;
   const BASE_WEEKS = 27; // per-week rates (growth, transfer activity) are tuned for a season this long
 
-  // ---------- datasets ----------
+  // ---------- game worlds ----------
+  const ROOT = typeof window !== 'undefined' ? window : globalThis;
+  const CL_KO_ROUNDS = ['Knockout play-off', 'Round of 16', 'Quarter-final', 'Semi-final', 'Final'];
   const FICTIONAL = {
     id: 'fictional', name: 'Fictional league', short: 'Fictional',
     note: 'Invented clubs and randomly generated players.',
-    divNames: ['Division 1', 'Division 2'], promoted: 2, cupName: 'Shield Cup', startYear: null,
-    autoEconomy: false, prizeScale: 1, clubs: CLUBS,
+    startYear: null, autoEconomy: false, prizeScale: 1,
+    leagues: [{ key: 'D1', name: 'Division 1', country: 'Fictional', tier: 1 }, { key: 'D2', name: 'Division 2', country: 'Fictional', tier: 2 }],
+    promotions: [{ up: 'D1', down: 'D2', count: 2 }],
+    cups: [{ name: 'Shield Cup', country: 'Fictional' }],
+    continental: null,
+    clubs: CLUBS.map((c) => ({ ...c, league: c.div === 1 ? 'D1' : 'D2' })),
   };
+  function buildWorld(id, name, short, note, packs, continental) {
+    const w = { id, name, short, note, startYear: 2025, autoEconomy: true, prizeScale: 2.5,
+      leagues: [], promotions: [], cups: [], clubs: [], continental: null };
+    packs.forEach((pk) => {
+      pk.leagues.forEach((l) => w.leagues.push({ ...l, country: pk.country }));
+      w.promotions.push(...(pk.promotions || []));
+      w.cups.push({ name: pk.cup, country: pk.country });
+      pk.clubs.forEach((c) => w.clubs.push({ ...c, country: pk.country }));
+    });
+    if (continental) {
+      const slots = Object.assign({}, ...packs.map((pk) => pk.clSlots || {}));
+      continental.guests.forEach((g) => w.clubs.push({ ...g, league: null }));
+      w.continental = { name: continental.name, slots, initial: continental.initial };
+    }
+    return w;
+  }
   function datasets() {
-    const extra = (typeof window !== 'undefined' ? window : globalThis).TM_DATASETS || {};
-    return [FICTIONAL, ...Object.values(extra)];
+    const C = ROOT.TM_COUNTRIES || {};
+    const worlds = [FICTIONAL];
+    const keys = ['england', 'spain', 'italy', 'france', 'germany'].filter((k) => C[k]);
+    if (keys.length >= 2 && ROOT.TM_CONTINENTAL) {
+      worlds.push(buildWorld('europe', 'Real football — Europe 2025/26', 'Europe 2025/26',
+        `${keys.map((k) => C[k].leagues.map((l) => l.name).join(' & ')).join(', ')} and the Champions League. Real clubs and players as of the start of the 2025/26 season; squads may be out of date and ratings are estimates.`,
+        keys.map((k) => C[k]), ROOT.TM_CONTINENTAL));
+    }
+    if (C.england) {
+      worlds.push(buildWorld('england', 'Real football — England 2025/26', 'England only',
+        'Premier League and Championship only, as of the start of the 2025/26 season. Squads may be out of date and ratings are estimates.',
+        [C.england], null));
+    }
+    return worlds;
   }
   const getDataset = (id) => datasets().find((d) => d.id === id) || FICTIONAL;
   const meta = () => G.meta;
-  const promotedCount = () => G.meta.promoted;
-  const cupName = () => G.meta.cupName;
-  const divName = (d) => G.meta.divNames[d - 1] || `Division ${d}`;
+  const leagueDivs = () => G.meta.leagues.map((_, i) => i + 1);
+  const divName = (d) => (d === 0 ? 'Rest of Europe' : (G.meta.leagues[d - 1] || {}).name || `Division ${d}`);
+  const divCountry = (d) => (d === 0 ? 'Europe' : G.meta.leagues[d - 1].country);
+  const divTier = (d) => (d === 0 ? 9 : G.meta.leagues[d - 1].tier);
+  function zoneInfo(d) {
+    const up = G.meta.promotions.find((p) => p.down === d), down = G.meta.promotions.find((p) => p.up === d);
+    return { promote: up ? up.count : 0, promoteTo: up ? up.up : null, relegate: down ? down.count : 0,
+      relegateTo: down ? down.down : null, cl: G.meta.cl ? (G.meta.cl.slots[d] || 0) : 0 };
+  }
+  const promotedCount = (d = userClub().div) => { const z = zoneInfo(d); return z.relegate || z.promote; };
+  const cupOfCountry = (country) => G.cups.findIndex((c) => c.country === country);
+  const userCupIdx = () => cupOfCountry(userClub().country);
+  const cupName = (ci = userCupIdx()) => (G.cups[ci] ? G.cups[ci].name : 'Cup');
+  const clName = () => (G.meta.cl ? G.meta.cl.name : null);
   const seasonName = (n = G.season) => (G.meta.startYear
     ? `${G.meta.startYear + n - 1}/${String(G.meta.startYear + n).slice(2)}` : `Season ${n}`);
   function prizeFor(d, i, n) {
-    const top = 9e6 * (G.meta.prizeScale || 1) * (d === 1 ? 1 : DIV2_PRIZE_SHARE);
+    const top = 9e6 * (G.meta.prizeScale || 1) * (divTier(d) === 1 ? 1 : DIV2_PRIZE_SHARE);
     const bottom = top * 0.133;
     return Math.round((bottom + (top - bottom) * Math.pow((n - 1 - i) / Math.max(1, n - 1), 1.4)) / 10000) * 10000;
   }
@@ -217,14 +262,22 @@
       manager: managerName || 'Manager',
       season: 1, week: 0, userClub: clubIndex,
       clubs: [], players: {}, freeAgents: [], nextPid: 1,
-      fixtures: [], calendar: [], cup: null, news: [], history: [], training: 'normal',
+      fixtures: [], calendar: [], cups: [], cl: null, clNext: null, news: [], history: [], training: 'normal',
       boardWarning: false, gameOver: false, seasonOver: false,
-      meta: { dataset: ds.id, divNames: ds.divNames, promoted: ds.promoted, cupName: ds.cupName,
-        startYear: ds.startYear || null, prizeScale: ds.prizeScale || (ds.autoEconomy ? 2.5 : 1) },
+      meta: {
+        dataset: ds.id,
+        leagues: ds.leagues.map((l) => ({ name: l.name, country: l.country, tier: l.tier })),
+        promotions: ds.promotions.map((p) => ({ up: leagueIndex(ds, p.up), down: leagueIndex(ds, p.down), count: p.count })),
+        cupsDef: ds.cups,
+        cl: ds.continental ? { name: ds.continental.name, slots: Object.fromEntries(Object.entries(ds.continental.slots).map(([k, v]) => [leagueIndex(ds, k), v])) } : null,
+        startYear: ds.startYear || null, prizeScale: ds.prizeScale || (ds.autoEconomy ? 2.5 : 1),
+      },
     };
     ds.clubs.forEach((c, i) => {
+      const div = c.league ? leagueIndex(ds, c.league) : 0;
       G.clubs.push({
-        id: i, name: c.name, short: c.short, color: c.color, rep: c.rep, div: c.div,
+        id: i, name: c.name, short: c.short, color: c.color, rep: c.rep, div,
+        country: div ? ds.leagues[div - 1].country : (c.country || 'Europe'),
         budget: ds.autoEconomy ? Math.max(5e6, Math.round((c.rep - 50) * 1.2e6 / 100000) * 100000)
           : Math.max(1.5e6, Math.round((c.rep - 50) * 450000 / 100000) * 100000),
         formation: pick(Object.keys(FORMATIONS)), mentality: 'balanced',
@@ -265,6 +318,9 @@
     G.offers = []; G.awards = [];
     G.academy = { level: clamp(Math.round((userClub().rep - 45) / 10), 1, 4), prospects: [] };
     for (let i = 0; i < 3; i++) newProspect(ri(15, 17));
+    if (ds.continental) {
+      G.clNext = ds.continental.initial.map((n) => G.clubs.findIndex((c) => c.name === n)).filter((id) => id >= 0);
+    }
     scheduleSeason();
     if (ds.autoEconomy) {
       // real wage bills vary wildly; scale each club's income so it starts roughly break-even
@@ -278,6 +334,7 @@
     pushNews(`Welcome, ${G.manager}! The board of ${userClub().name} expects a finish around ${ordinal(expectedPosition())} in the ${divName(userClub().div)}.`);
     return G;
   }
+  const leagueIndex = (ds, key) => ds.leagues.findIndex((l) => l.key === key) + 1;
   function starterCount(pos) { return { GK: 1, DF: 4, MF: 4, FW: 2 }[pos]; }
   function blankTable() { return { p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0, form: [] }; }
 
@@ -285,15 +342,6 @@
     const a = [...arr];
     for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
     return a;
-  }
-  function makeCalendar(leagueSlots, cupAfter) {
-    const cal = [];
-    let md = 0, cr = 0;
-    while (md < leagueSlots || cr < cupAfter.length) {
-      if (cr < cupAfter.length && md >= cupAfter[cr]) cal.push({ type: 'cup', round: cr++ });
-      else cal.push({ type: 'league', md: md++ });
-    }
-    return cal;
   }
   function cupFormat(n) {
     // knockout for any number of clubs: a first round trims the field to a power of two
@@ -305,15 +353,46 @@
     const prizes = rounds.map((_, i) => Math.round(top * Math.pow(0.5, rounds.length - 1 - i) / 10000) * 10000);
     return { rounds, prizes, byes: firstTies ? n - 2 * firstTies : 0 };
   }
+  // Champions League money (scaled like everything else in the world)
+  const clMoney = () => {
+    const ps = G.meta.prizeScale || 1;
+    return { entry: 6e6 * ps, win: 0.84e6 * ps, draw: 0.28e6 * ps, ko: [1e6, 4e6, 5e6, 6.5e6, 10e6].map((v) => v * ps) };
+  };
   function scheduleSeason() {
-    const divs = [1, 2];
-    const sizes = divs.map((d) => G.clubs.filter((c) => c.div === d).length);
-    const leagueRounds = sizes.map((n) => (n - 1) * 2);
+    const divs = leagueDivs();
+    const leagueRounds = divs.map((d) => (G.clubs.filter((c) => c.div === d).length - 1) * 2);
     const slots = Math.max(...leagueRounds);
-    const fmt = cupFormat(G.clubs.length);
-    const R = fmt.rounds.length;
-    const cupAfter = fmt.rounds.map((_, i) => (i === R - 1 ? slots : Math.round(slots * (i + 1) / R)));
-    G.calendar = makeCalendar(slots, cupAfter);
+    // a domestic cup per country, for that country's league clubs
+    G.cups = G.meta.cupsDef.map((def) => {
+      const ids = G.clubs.filter((c) => c.country === def.country && c.div > 0).map((c) => c.id);
+      const fmt = cupFormat(ids.length);
+      const seeds = ids.map(club).sort((a, b) => divTier(a.div) - divTier(b.div) || b.rep - a.rep).slice(0, fmt.byes);
+      return { name: def.name, country: def.country, clubs: ids, alive: [...ids], byes: seeds.map((c) => c.id),
+        winner: null, rounds: fmt.rounds, prizes: fmt.prizes, offset: 0 };
+    });
+    const cupSlots = Math.max(0, ...G.cups.map((c) => c.rounds.length));
+    G.cups.forEach((c) => { c.offset = cupSlots - c.rounds.length; }); // finals line up at the end of the season
+    // continental competition
+    const clIds = G.meta.cl ? (G.clNext || []) : [];
+    G.cl = clIds.length >= 24 ? { clubs: clIds, table: {}, seeds: [], out: [], winner: null } : null;
+    if (G.cl) {
+      clIds.forEach((id) => { G.cl.table[id] = blankTable(); club(id).budget += clMoney().entry; });
+    }
+    // calendar: league matchdays with cup and European weeks slotted in
+    const specials = [];
+    for (let k = 0; k < cupSlots; k++) specials.push({ f: cupSlots > 1 ? 0.08 + 0.89 * k / (cupSlots - 1) : 0.97, slot: { type: 'cup', k } });
+    if (G.cl) {
+      for (let i = 0; i < 8; i++) specials.push({ f: 0.07 + 0.55 * i / 7, slot: { type: 'cl', lp: i } });
+      CL_KO_ROUNDS.forEach((_, j) => specials.push({ f: 0.68 + 0.31 * j / (CL_KO_ROUNDS.length - 1), slot: { type: 'cl', ko: j } }));
+    }
+    specials.sort((a, b) => a.f - b.f);
+    G.calendar = [];
+    let si = 0;
+    for (let md = 0; md < slots; md++) {
+      while (si < specials.length && specials[si].f * slots <= md) G.calendar.push(specials[si++].slot);
+      G.calendar.push({ type: 'league', md });
+    }
+    while (si < specials.length) G.calendar.push(specials[si++].slot);
     const weekOfSlot = {};
     G.calendar.forEach((c, i) => { if (c.type === 'league') weekOfSlot[c.md] = i; });
     G.fixtures = [];
@@ -326,31 +405,108 @@
         G.fixtures.push(f);
       });
     });
-    const seeds = [...G.clubs].sort((a, b) => a.div - b.div || b.rep - a.rep).slice(0, fmt.byes);
-    G.cup = { alive: G.clubs.map((c) => c.id), byes: seeds.map((c) => c.id), winner: null, rounds: fmt.rounds, prizes: fmt.prizes };
+    if (G.cl) {
+      const lpWeek = {};
+      G.calendar.forEach((c, i) => { if (c.type === 'cl' && c.lp !== undefined) lpWeek[c.lp] = i; });
+      clLeaguePhase(clIds).forEach(([h, a, md]) => G.fixtures.push({ comp: 'CL', stage: 'lp', md, week: lpWeek[md], home: h, away: a, played: false, hg: 0, ag: 0 }));
+    }
+  }
+  function clLeaguePhase(ids) {
+    // 8 different opponents each: link every club to those 1, 2, 3 and 5 places along a shuffled
+    // circle; each of those rings splits into two rounds where everyone plays exactly once
+    const order = shuffle(ids), n = order.length, out = [];
+    const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+    const offsets = [];
+    for (let k = 1; offsets.length < 4 && k < n / 2; k++) if ((n / gcd(n, k)) % 2 === 0) offsets.push(k);
+    offsets.forEach((k, oi) => {
+      const g = gcd(n, k), L = n / g;
+      for (let st = 0; st < g; st++) {
+        const seq = Array.from({ length: L }, (_, j) => order[(st + j * k) % n]);
+        for (let j = 0; j < L; j++) {
+          const a = seq[j], b = seq[(j + 1) % L];
+          out.push(rand() < 0.5 ? [a, b, oi * 2 + (j % 2)] : [b, a, oi * 2 + (j % 2)]);
+        }
+      }
+    });
+    return out;
+  }
+  function clStandings() {
+    if (!G.cl) return [];
+    const t = G.cl.table;
+    return [...G.cl.clubs].sort((a, b) => t[b].pts - t[a].pts || (t[b].gf - t[b].ga) - (t[a].gf - t[a].ga)
+      || t[b].gf - t[a].gf || club(b).rep - club(a).rep);
+  }
+  function clDraw(week, j) {
+    if (!G.cl || fixturesForWeek(week).length) return;
+    const add = (pairs) => pairs.forEach(([h, a], tie) => G.fixtures.push({ comp: 'CL', stage: 'ko', round: j, tie, ko: true, week, home: h, away: a, played: false, hg: 0, ag: 0 }));
+    const winnersOf = (r) => G.fixtures.filter((f) => f.comp === 'CL' && f.stage === 'ko' && f.round === r).sort((a, b) => a.tie - b.tie).map((f) => f.winner);
+    if (j === 0) {
+      const st = clStandings();
+      G.cl.seeds = st.slice(0, 8);
+      const po = st.slice(8, 24);
+      G.cl.out = st.slice(24);
+      add(Array.from({ length: 8 }, (_, t) => [po[t], po[15 - t]]));
+      if (G.cl.out.includes(G.userClub)) pushNews(`⭐ Out of the ${clName()}: you finished ${ordinal(st.indexOf(G.userClub) + 1)} in the league phase.`);
+      else if (G.cl.seeds.includes(G.userClub)) pushNews(`⭐ Top 8 in the ${clName()} league phase: straight into the round of 16!`);
+    } else if (j === 1) {
+      const w = winnersOf(0);
+      add(G.cl.seeds.map((sd, i) => [sd, w[7 - i]]));
+    } else {
+      const w = winnersOf(j - 1);
+      add(Array.from({ length: w.length / 2 }, (_, t) => [w[2 * t], w[2 * t + 1]]));
+    }
+    const uf = userFixture(week);
+    if (uf) pushNews(`⭐ ${clName()} ${CL_KO_ROUNDS[j].toLowerCase()}: ${club(uf.home).name} v ${club(uf.away).name}.`);
   }
   function cupDraw(week) {
     const cal = G.calendar[week];
-    if (!cal || cal.type !== 'cup' || fixturesForWeek(week).length) return;
-    const r = cal.round;
-    const pool = shuffle(G.cup.alive.filter((id) => r > 0 || !G.cup.byes.includes(id)));
-    for (let i = 0; i + 1 < pool.length; i += 2) {
-      G.fixtures.push({ comp: 'CUP', round: r, week, home: pool[i], away: pool[i + 1], played: false, hg: 0, ag: 0 });
-    }
-    const uf = userFixture(week);
-    if (uf) pushNews(`🏆 ${cupName()} ${G.cup.rounds[r].toLowerCase()} draw: ${club(uf.home).name} v ${club(uf.away).name}.`);
-    else if (r === 0 && G.cup.byes.includes(G.userClub)) pushNews(`🏆 As a seeded club you have a bye through the ${cupName()} first round.`);
+    if (!cal) return;
+    if (cal.type === 'cl' && cal.ko !== undefined) { clDraw(week, cal.ko); return; }
+    if (cal.type !== 'cup') return;
+    G.cups.forEach((cup, ci) => {
+      const r = cal.k - cup.offset;
+      if (r < 0 || G.fixtures.some((f) => f.comp === 'CUP' && f.cup === ci && f.round === r)) return;
+      const pool = shuffle(cup.alive.filter((id) => r > 0 || !cup.byes.includes(id)));
+      for (let i = 0; i + 1 < pool.length; i += 2) {
+        G.fixtures.push({ comp: 'CUP', cup: ci, round: r, ko: true, week, home: pool[i], away: pool[i + 1], played: false, hg: 0, ag: 0 });
+      }
+      if (ci !== userCupIdx()) return;
+      const uf = userFixture(week);
+      if (uf) pushNews(`🏆 ${cup.name} ${cup.rounds[r].toLowerCase()} draw: ${club(uf.home).name} v ${club(uf.away).name}.`);
+      else if (r === 0 && cup.byes.includes(G.userClub)) pushNews(`🏆 As a seeded club you have a bye through the ${cup.name} first round.`);
+    });
   }
   function cupResult(cid) {
-    if (G.cup.winner === cid) return 'Winners';
-    const lost = G.fixtures.find((f) => f.comp === 'CUP' && f.played && (f.home === cid || f.away === cid) && f.winner !== cid);
-    if (lost) return lost.round === G.cup.rounds.length - 1 ? 'Runners-up' : `Out in ${G.cup.rounds[lost.round].toLowerCase()}`;
-    return G.cup.alive.includes(cid) ? 'Still in' : '-';
+    const ci = cupOfCountry(club(cid).country);
+    const cup = G.cups[ci];
+    if (!cup || !cup.clubs.includes(cid)) return '-';
+    if (cup.winner === cid) return 'Winners';
+    const lost = G.fixtures.find((f) => f.comp === 'CUP' && f.cup === ci && f.played && (f.home === cid || f.away === cid) && f.winner !== cid);
+    if (lost) return lost.round === cup.rounds.length - 1 ? 'Runners-up' : `Out in ${cup.rounds[lost.round].toLowerCase()}`;
+    return cup.alive.includes(cid) ? 'Still in' : '-';
+  }
+  function clResult(cid) {
+    if (!G.cl || !G.cl.clubs.includes(cid)) return null;
+    if (G.cl.winner === cid) return 'Winners';
+    const lost = G.fixtures.find((f) => f.comp === 'CL' && f.stage === 'ko' && f.played && (f.home === cid || f.away === cid) && f.winner !== cid);
+    if (lost) return lost.round === CL_KO_ROUNDS.length - 1 ? 'Runners-up' : `Out in ${CL_KO_ROUNDS[lost.round].toLowerCase()}`;
+    if (G.cl.out.includes(cid)) return 'Out in league phase';
+    return 'Still in';
+  }
+  function tiePrize(fx) {
+    if (fx.comp === 'CUP') return G.cups[fx.cup].prizes[fx.round];
+    if (fx.comp === 'CL' && fx.stage === 'ko') return clMoney().ko[fx.round];
+    return 0;
   }
   function weekLabel(w, div = userClub().div) {
     const c = G.calendar[w];
     if (!c) return '';
-    if (c.type === 'cup') return `${cupName()} · ${G.cup.rounds[c.round]}`;
+    if (c.type === 'cup') {
+      const cup = G.cups[cupOfCountry(divCountry(div))];
+      const r = cup ? c.k - cup.offset : -1;
+      return r >= 0 ? `${cup.name} · ${cup.rounds[r]}` : 'Cup week';
+    }
+    if (c.type === 'cl') return c.lp !== undefined ? `${clName()} · League phase ${c.lp + 1}` : `${clName()} · ${CL_KO_ROUNDS[c.ko]}`;
     const f = fixturesForWeek(w).find((x) => x.comp === 'L' && x.div === div);
     return f ? `Matchday ${f.md + 1}` : 'Rest week';
   }
@@ -582,7 +738,7 @@
     [0, 1].forEach((s) => { if (m.sides[s] !== G.userClub || opts.autoUser) aiSubs(m, s); });
     if (m.min === 45) ev(m, -1, 'info', `⏸ Half-time: ${m.score[0]}-${m.score[1]}`);
     if (m.min >= 90) {
-      if (m.fx.comp === 'CUP' && m.score[0] === m.score[1]) shootout(m);
+      if (m.fx.ko && m.score[0] === m.score[1]) shootout(m);
       m.done = true;
       ev(m, -1, 'info', `🏁 Full-time: ${club(m.sides[0]).name} ${m.score[0]}-${m.score[1]} ${club(m.sides[1]).name}${m.pens ? ` (${m.pens[0]}-${m.pens[1]} on penalties)` : ''}`);
     }
@@ -623,29 +779,39 @@
   function applyResult(m) {
     const { fx } = m;
     fx.played = true; fx.hg = m.score[0]; fx.ag = m.score[1];
-    fx.scorers = m.scorers.map((s) => ({ side: s.side, name: pname(s.pid), min: s.min }));
+    // keep scorer names only for the user's own matches; storing them for every game bloats the save
+    if (m.sides.includes(G.userClub)) fx.scorers = m.scorers.map((s) => ({ side: s.side, name: pname(s.pid), min: s.min }));
     let res = fx.hg > fx.ag ? ['W', 'L'] : fx.hg < fx.ag ? ['L', 'W'] : ['D', 'D'];
-    if (fx.comp === 'CUP') {
+    if (fx.ko) {
       fx.pens = m.pens || null;
       const ws = fx.hg !== fx.ag ? (fx.hg > fx.ag ? 0 : 1) : (m.pens[0] > m.pens[1] ? 0 : 1);
       res = ws === 0 ? ['W', 'L'] : ['L', 'W'];
       fx.winner = m.sides[ws];
       const loser = m.sides[1 - ws];
-      G.cup.alive = G.cup.alive.filter((id) => id !== loser);
-      club(fx.winner).budget += G.cup.prizes[fx.round];
-      if (fx.round === G.cup.rounds.length - 1) {
-        G.cup.winner = fx.winner;
-        pushNews(`🏆 ${club(fx.winner).name} win the ${cupName()}, beating ${club(loser).name}!`);
+      const prize = tiePrize(fx);
+      club(fx.winner).budget += prize;
+      const isCup = fx.comp === 'CUP';
+      const comp = isCup ? G.cups[fx.cup] : null;
+      const name = isCup ? comp.name : clName();
+      const rounds = isCup ? comp.rounds : CL_KO_ROUNDS;
+      if (isCup) comp.alive = comp.alive.filter((id) => id !== loser);
+      if (fx.round === rounds.length - 1) {
+        if (isCup) comp.winner = fx.winner; else G.cl.winner = fx.winner;
+        if (isCup ? (fx.cup === userCupIdx() || m.sides.includes(G.userClub)) : true) {
+          pushNews(`${isCup ? '🏆' : '⭐'} ${club(fx.winner).name} win the ${name}, beating ${club(loser).name}!`);
+        }
       } else if (fx.winner === G.userClub) {
-        pushNews(`🏆 Through to the ${cupName()} ${G.cup.rounds[fx.round + 1].toLowerCase()} (+${money(G.cup.prizes[fx.round])}).`);
-      } else if (loser === G.userClub) pushNews(`💔 Knocked out of the ${cupName()} in the ${G.cup.rounds[fx.round].toLowerCase()}.`);
+        pushNews(`${isCup ? '🏆' : '⭐'} Through to the ${name} ${rounds[fx.round + 1].toLowerCase()} (+${money(prize)}).`);
+      } else if (loser === G.userClub) pushNews(`💔 Knocked out of the ${name} in the ${rounds[fx.round].toLowerCase()}.`);
     } else {
-      const [h, a] = [club(fx.home).table, club(fx.away).table];
+      const cl = fx.comp === 'CL';
+      const [h, a] = cl ? [G.cl.table[fx.home], G.cl.table[fx.away]] : [club(fx.home).table, club(fx.away).table];
       h.p++; a.p++; h.gf += fx.hg; h.ga += fx.ag; a.gf += fx.ag; a.ga += fx.hg;
       [h, a].forEach((t, i) => {
         const r = res[i];
         if (r === 'W') { t.w++; t.pts += 3; } else if (r === 'D') { t.d++; t.pts += 1; } else t.l++;
         t.form = [...t.form, r].slice(-5);
+        if (cl) club(m.sides[i]).budget += r === 'W' ? clMoney().win : r === 'D' ? clMoney().draw : 0;
       });
     }
     m.sides.forEach((cid, s) => {
@@ -1079,19 +1245,24 @@
     const div = u.div;
     const pos = position(G.userClub);
     const exp = expectedPosition();
-    const t1 = standings(1), t2 = standings(2);
-    const k = promotedCount();
-    const relegated = t1.slice(-k), promoted = t2.slice(0, k);
+    const divs = leagueDivs();
+    const tables = {};
+    divs.forEach((d) => { tables[d] = standings(d); });
+    const moves = G.meta.promotions.map((p) => ({ p, down: tables[p.up].slice(-p.count), up: tables[p.down].slice(0, p.count) }));
+    const myMove = moves.find((mv) => mv.p.up === div || mv.p.down === div);
     const topScorer = Object.values(G.players).filter((p) => p.club !== null && club(p.club).div === div)
       .sort((a, b) => b.goals - a.goals)[0];
+    const uci = userCupIdx();
     const summary = {
-      season: G.season, division: div, champion: t1[0].name, d2Champion: t2[0].name,
-      position: pos, expected: exp, points: u.table.pts, prize: prizeFor(div, pos - 1, standings(div).length),
-      promoted: promoted.map((c) => c.name), relegated: relegated.map((c) => c.name),
-      cupWinner: G.cup.winner !== null ? club(G.cup.winner).name : '-', cup: cupResult(G.userClub),
+      season: G.season, division: div, champion: tables[div][0].name,
+      champions: divs.map((d) => ({ league: divName(d), club: tables[d][0].name })),
+      position: pos, expected: exp, points: u.table.pts, prize: prizeFor(div, pos - 1, tables[div].length),
+      promoted: myMove ? myMove.up.map((c) => c.name) : [], relegated: myMove ? myMove.down.map((c) => c.name) : [],
+      cupName: cupName(), cupWinner: uci >= 0 && G.cups[uci].winner !== null ? club(G.cups[uci].winner).name : '-', cup: cupResult(G.userClub),
+      clName: clName(), clWinner: G.cl && G.cl.winner !== null ? club(G.cl.winner).name : null, cl: clResult(G.userClub),
       topScorer: topScorer ? `${topScorer.name} (${club(topScorer.club).short}) — ${topScorer.goals}` : '-',
       retired: [], youth: [], departed: [], graduatesLeft: [], verdict: '', move: null,
-      goldenBoy: null, goldenBoyMine: false, nominees: [],
+      goldenBoy: null, goldenBoyMine: false, nominees: [], qualified: false,
     };
     const gb = goldenBoy();
     if (gb.length) {
@@ -1104,7 +1275,15 @@
       if (summary.goldenBoyMine) { u.rep = Math.min(92, u.rep + 1); w.morale = 100; }
       w.pot = Math.min(96, w.pot + 1);
     }
-    [[1, t1], [2, t2]].forEach(([d, table]) => {
+    // next season's continental field: the top clubs of each league plus the rest-of-Europe sides
+    if (G.meta.cl) {
+      G.clNext = [];
+      divs.forEach((d) => { G.clNext.push(...tables[d].slice(0, G.meta.cl.slots[d] || 0).map((c) => c.id)); });
+      G.clNext.push(...G.clubs.filter((c) => c.div === 0).map((c) => c.id));
+      summary.qualified = G.clNext.includes(G.userClub);
+    }
+    divs.forEach((d) => {
+      const table = tables[d];
       const byRep = [...table].sort((a, b) => b.rep - a.rep);
       table.forEach((c, i) => {
         c.budget += prizeFor(d, i, table.length);
@@ -1112,33 +1291,37 @@
       });
     });
     // promotion & relegation
-    relegated.forEach((c) => { c.div = 2; c.rep = Math.max(40, c.rep - 3); });
-    promoted.forEach((c) => { c.div = 1; c.rep = Math.min(92, c.rep + 3); });
-    const wentUp = promoted.includes(u), wentDown = relegated.includes(u);
+    moves.forEach((mv) => {
+      mv.down.forEach((c) => { c.div = mv.p.down; c.rep = Math.max(40, c.rep - 3); });
+      mv.up.forEach((c) => { c.div = mv.p.up; c.rep = Math.min(92, c.rep + 3); });
+    });
+    const wentUp = !!myMove && myMove.up.includes(u), wentDown = !!myMove && myMove.down.includes(u);
     if (wentUp) summary.move = 'up';
     if (wentDown) summary.move = 'down';
 
     let sacked = false;
+    const k = zoneInfo(div).relegate;
     if (wentUp) summary.verdict = pos === 1 ? 'Champions and promoted! The board is ecstatic.' : 'Promoted! The board is thrilled.';
     else if (pos <= exp - 2) summary.verdict = 'The board is delighted — you smashed expectations!';
     else if (pos <= exp && !wentDown) summary.verdict = 'The board is pleased with the season.';
-    else if (wentDown && exp <= t1.length - k - 3) sacked = true;
+    else if (wentDown && exp <= tables[div].length - k - 3) sacked = true;
     else if (wentDown) summary.verdict = 'Relegated. The board expected a struggle and keeps faith in you to bounce back.';
     else if (pos <= exp + 3) summary.verdict = 'The board expected more, but your job is safe.';
     else sacked = true;
-    if (sacked && G.cup.winner === G.userClub) {
-      summary.verdict = `A poor league season, but winning the ${cupName()} has saved your job.`;
+    const trophy = (uci >= 0 && G.cups[uci].winner === G.userClub) ? cupName() : (G.cl && G.cl.winner === G.userClub ? clName() : null);
+    if (sacked && trophy) {
+      summary.verdict = `A poor league season, but winning the ${trophy} has saved your job.`;
       sacked = false;
     }
     if (sacked) {
       summary.verdict = 'The board is deeply disappointed. You have been sacked.';
       G.gameOver = true;
       G.gameOverReason = wentDown
-        ? `Relegated from the ${divName(1)} when the board expected ${ordinal(exp)}.`
+        ? `Relegated from the ${divName(div)} when the board expected ${ordinal(exp)}.`
         : `Finished ${ordinal(pos)} in the ${divName(div)} when the board expected ${ordinal(exp)}.`;
     }
     G.history.push({ season: G.season, division: div, position: pos, points: summary.points,
-      champion: div === 1 ? t1[0].name : t2[0].name, cup: summary.cup, move: summary.move });
+      champion: summary.champion, cup: summary.cup, cl: summary.cl, move: summary.move });
 
     // ageing, development, retirement
     Object.values(G.players).forEach((p) => {
@@ -1191,7 +1374,7 @@
         for (let i = 0; i < 3; i++) {
           const y = addPlayer(genPlayer(pick(['GK', 'DF', 'MF', 'MF', 'FW', 'DF']), c.rep - 2 + ri(-3, 6), 16, 17), c.id);
           y.pot = clamp(y.pot + ri(0, 8), y.ovr, Math.max(WK_POT - 1, y.ovr));
-          if (rand() < 0.035) makeWonderkid(y);
+          if (rand() < Math.min(0.035, 4 / (G.clubs.length * 3))) makeWonderkid(y); // about 4 new gems a season league-wide
           y.contract = 3;
         }
         for (const pos of Object.keys(SQUAD_TEMPLATE)) {
@@ -1231,6 +1414,7 @@
     G.news = [];
     G.offers = [];
     pushNews(`📅 ${seasonName()} begins in the ${divName(userClub().div)}. The board expects a finish around ${ordinal(expectedPosition())}.`);
+    if (G.cl && G.cl.clubs.includes(G.userClub)) pushNews(`⭐ You're in the ${clName()} this season (+${money(clMoney().entry)} entry money).`);
   }
 
   // ---------- helpers ----------
@@ -1254,7 +1438,7 @@
   function serialize() { return JSON.stringify(G); }
   function load(json) {
     const data = typeof json === 'string' ? JSON.parse(json) : json;
-    if (!data || ![2, 3, 4, SAVE_VERSION].includes(data.version)) throw new Error('Incompatible save');
+    if (!data || ![2, 3, 4, 5, SAVE_VERSION].includes(data.version)) throw new Error('Incompatible save');
     G = data;
     if (G.version === 2) {
       // v2 saves had no contracts or academy
@@ -1273,9 +1457,26 @@
     }
     if (G.version === 4) {
       // v4 saves were always the fictional league with a fixed 24-club cup
-      G.meta = { dataset: 'fictional', divNames: FICTIONAL.divNames, promoted: 2, cupName: 'Shield Cup', startYear: null, prizeScale: 1 };
+      G.meta = { dataset: 'fictional', divNames: ['Division 1', 'Division 2'], promoted: 2, cupName: 'Shield Cup', startYear: null, prizeScale: 1 };
       G.cup.rounds = ['First round', 'Round of 16', 'Quarter-final', 'Semi-final', 'Final'];
       G.cup.prizes = [150000, 300000, 600000, 1200000, 3000000];
+      G.version = 5;
+    }
+    if (G.version === 5) {
+      // v5 saves had exactly two divisions and one cup, and no continental competition
+      const country = G.meta.dataset === 'england' ? 'England' : 'Fictional';
+      const old = G.meta;
+      G.meta = { dataset: old.dataset, leagues: old.divNames.map((n, i) => ({ name: n, country, tier: i + 1 })),
+        promotions: [{ up: 1, down: 2, count: old.promoted }], cupsDef: [{ name: old.cupName, country }], cl: null,
+        startYear: old.startYear, prizeScale: old.prizeScale };
+      G.clubs.forEach((c) => { c.country = country; });
+      const cup = G.cup;
+      G.cups = [{ name: old.cupName, country, clubs: G.clubs.map((c) => c.id), alive: cup.alive, byes: cup.byes,
+        winner: cup.winner, rounds: cup.rounds, prizes: cup.prizes, offset: 0 }];
+      delete G.cup;
+      G.calendar.forEach((c) => { if (c.type === 'cup') { c.k = c.round; delete c.round; } });
+      G.fixtures.forEach((f) => { if (f.comp === 'CUP') { f.cup = 0; f.ko = true; } });
+      G.cl = null; G.clNext = null;
       G.version = SAVE_VERSION;
     }
     return G;
@@ -1291,7 +1492,8 @@
     endWeek, endSeason, startNextSeason, standings, position, expectedPosition,
     playerValue, askingPrice, signingWage, canBuy, buy, getOffer, sell, release, releaseCost,
     money, ordinal, pushNews, gateIncome, weeklyIncome, wageBill,
-    meta, cupName, divName, seasonName, promotedCount, cupResult, weekLabel,
+    meta, cupName, divName, divCountry, leagueDivs, zoneInfo, seasonName, promotedCount, cupResult, weekLabel,
+    clName, clResult, clStandings, tiePrize, userCupIdx, cupOfCountry, CL_KO_ROUNDS,
     ACADEMY_MAX, ACADEMY_GRAD_AGE, RENEW_WINDOW, academyUpgradeCost, academyUpkeep, academyIntake, prospects,
     potentialRange, upgradeAcademy, promoteProspect, releaseProspect,
     contractEnds, canNegotiate, offerContract, expiringPlayers, signingLength,
