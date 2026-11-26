@@ -126,7 +126,7 @@
         'Joachim Andersen|DF|29|79', 'Calvin Bassey|DF|25|77', 'Issa Diop|DF|28|75', 'Kenny Tete|DF|29|76',
         'Timothy Castagne|DF|29|76', 'Antonee Robinson|DF|27|80', 'Jorge Cuenca|DF|25|72', 'Ryan Sessegnon|DF|25|72',
         'Sander Berge|MF|27|77', 'Saša Lukić|MF|29|76', 'Harrison Reed|MF|30|74', 'Tom Cairney|MF|34|73',
-        'Emile Smith Rowe|MF|25|78', 'Andreas Pereira|MF|29|78', 'Alex Iwobi|MF|29|79', 'Josh King|MF|18|66|80',
+        'Emile Smith Rowe|MF|25|78', 'Alex Iwobi|MF|29|79', 'Josh King|MF|18|66|80',
         'Adama Traoré|FW|29|76', 'Harry Wilson|FW|28|78', 'Samuel Chukwueze|FW|26|76', 'Kevin|FW|22|74|81',
         'Raúl Jiménez|FW|34|77', 'Rodrigo Muniz|FW|24|76'] },
       { name: 'Brentford', short: 'BRE', color: '#E30613', rep: 75, league: 'ENG1', players: [

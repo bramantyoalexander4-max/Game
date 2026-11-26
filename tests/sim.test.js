@@ -1,7 +1,7 @@
 // Headless smoke test: plays several full seasons and checks invariants.
 // Run with: node tests/sim.test.js
 const assert = require('assert');
-['england', 'spain', 'italy', 'france', 'germany', 'netherlands', 'portugal', 'others', 'europe', 'nations'].forEach((f) => require(`../data/${f}.js`));
+['england', 'spain', 'italy', 'france', 'germany', 'netherlands', 'portugal', 'others', 'world', 'europe', 'nations'].forEach((f) => require(`../data/${f}.js`));
 require('../js/engine.js');
 const E = globalThis.Engine;
 
@@ -41,11 +41,12 @@ for (let season = 0; season < 5; season++) {
     assert(E.state.cl.winner !== null);
   }
   if (E.state.intl && E.state.intl.kind) {
-    const I = E.state.intl;
-    assert.strictEqual(I.qualified.length, 24, '24 nations qualify');
+    const I = E.state.intl, nl = I.format === 'nl';
+    assert.strictEqual(I.qualified.length, nl ? 4 : 24, 'finalists / qualifiers');
     assert(I.winner !== null, 'tournament has a winner');
-    assert.strictEqual(E.state.fixtures.filter((f) => f.comp === 'INT' && f.stage === 'TK').length, 15);
+    assert.strictEqual(E.state.fixtures.filter((f) => f.comp === 'INT' && f.stage === 'TK').length, nl ? 3 : 15);
     I.groups.forEach((g) => g.forEach((id) => assert.strictEqual(I.qTable[id].p, 6)));
+    if (nl) wkLog.push(`NL ${['A', 'B', 'C'].map((L) => L + ':' + Object.values(E.state.nlLeagues).filter((x) => x === L).length).join(' ')}`);
   }
   E.state.nations.forEach((n) => n.squad.forEach((id) => assert(E.player(id) && E.player(id).nat === n.code)));
   // every club plays at most once per week
@@ -85,6 +86,7 @@ for (let season = 0; season < 5; season++) {
   wkLog.push(`gb ${s.goldenBoy}`);
   console.log(`   academy L${E.state.academy.level}: ${E.prospects().map((p) => p.ovr + '/' + p.pot).join(' ')}; left on free: ${s.departed.length}; squad ${E.userClub().squad.length}`);
   if (E.state.gameOver) { E.state.gameOver = false; E.startNextSeason(); } // the test bot ignores sackings
+  if (wkLog.length && wkLog[wkLog.length - 1].startsWith('NL')) console.log('   ' + wkLog[wkLog.length - 1]);
   if (s.intl) console.log(`   ${s.intl.name}: ${s.intl.winner} beat ${s.intl.runnerUp}${s.intl.mine ? ' | you: ' + s.intl.mine + ' — ' + s.verdict : ''}`);
   else if (national) console.log('   ' + s.verdict);
   console.log(`S${s.season}: ${s.champions.map((c) => c.league + ' ' + c.club).join(', ')}; CL ${clWinner}; cup ${s.cupWinner}; user D${s.division} ${s.position} (exp ${s.expected}) cup ${s.cup} CL ${s.cl}, budget ${E.money(E.userClub().budget)}, top ${s.topScorer}`);

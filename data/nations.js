@@ -10,7 +10,8 @@
     countryCodes: {
       England: 'ENG', Spain: 'ESP', Italy: 'ITA', France: 'FRA', Germany: 'GER', Netherlands: 'NED', Portugal: 'POR',
       Turkey: 'TUR', Belgium: 'BEL', Greece: 'GRE', Czechia: 'CZE', Denmark: 'DEN', Norway: 'NOR', Azerbaijan: 'AZE',
-      Cyprus: 'CYP', Kazakhstan: 'KAZ',
+      Cyprus: 'CYP', Kazakhstan: 'KAZ', Brazil: 'BRA', Argentina: 'ARG', 'United States': 'USA', Mexico: 'MEX',
+      'Saudi Arabia': 'KSA', Japan: 'JPN', 'South Korea': 'KOR', Scotland: 'SCO', Austria: 'AUT', Switzerland: 'SUI',
     },
     meta: [
       // code, name, kit colour, confederation

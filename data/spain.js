@@ -37,7 +37,7 @@
         'Antoine Griezmann|FW|34|83', 'Julián Alvarez|FW|25|86', 'Alexander Sørloth|FW|29|80', 'Giacomo Raspadori|FW|25|77'] },
       { name: 'Athletic Club', short: 'ATH', color: '#EE2523', rep: 80, league: 'ESP1', players: [
         'Unai Simón|GK|28|84',
-        'Dani Vivian|DF|26|80', 'Aitor Paredes|DF|25|77', 'Yeray Álvarez|DF|30|75', 'Óscar de Marcos|DF|36|73',
+        'Dani Vivian|DF|26|80', 'Aymeric Laporte|DF|31|80', 'Aitor Paredes|DF|25|77', 'Yeray Álvarez|DF|30|75', 'Óscar de Marcos|DF|36|73',
         'Andoni Gorosabel|DF|29|75', 'Yuri Berchiche|DF|35|74', 'Jesús Areso|DF|26|75', 'Adama Boiro|DF|22|72',
         'Mikel Vesga|MF|32|74', 'Beñat Prados|MF|24|76', 'Mikel Jauregizar|MF|21|76|83', 'Oihan Sancet|MF|25|80',
         'Iñigo Ruiz de Galarreta|MF|32|76', 'Unai Gómez|MF|22|73',

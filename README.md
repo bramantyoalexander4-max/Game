@@ -17,10 +17,19 @@ Take charge of a club and manage the squad, tactics, transfers and finances acro
   - Each summer there's a tournament: the World Cup in 2026 and 2030, the Euros in 2028. Qualifying groups of 4 lead to a 24-team finals with 6 groups, then a round of 16. There are no tournaments in odd years, so those seasons are friendlies.
   - The federation sets a target from your world ranking. Missing it by one stage earns a warning; a second miss, or missing by two stages, gets you sacked.
   - In club careers the internationals run in the background, and you can follow them in League → International.
+- **World 2025/26:** everything in the Europe world, plus Scotland, Austria, Switzerland, Brazil, Argentina, the USA (MLS), Mexico, Saudi Arabia, Japan and South Korea. That's 26 countries, 470 clubs and 10,500 players.
+  - Each country has its own cup, and every club and national team is manageable.
+  - Stars include Messi at Inter Miami, Neymar at Santos, Ronaldo and Benzema in Saudi Arabia, and Son at LAFC. Squads outside the big leagues are mostly generated.
+  - It's the biggest world, so it runs slower on older phones.
+- **Nations League:** in years without a World Cup or Euro, European national teams play the Nations League instead of friendlies.
+  - Leagues A, B and C have groups of 4 over the 6 international breaks.
+  - Group winners go up and bottom sides go down, in equal numbers so the leagues keep their size.
+  - The 4 League A group winners play Finals (semi-finals and a final) in the summer.
+  - Other nations play friendlies.
 - **England only:** just the Premier League and Championship.
 - **Fictional:** 24 invented clubs in two divisions of 12, with randomly generated players.
 
-> The real-football data in `data/` (`england.js`, `spain.js`, `italy.js`, `france.js`, `germany.js`, `netherlands.js`, `portugal.js`, `others.js`, `europe.js`, `nations.js`) is an unofficial, best-effort snapshot. Squads may be out of date (transfers after summer 2025 aren't included), ages are approximate, and the ratings are editorial estimates rather than official figures. Partially known squads, mostly smaller clubs, are topped up with generated players. No club crests or logos are used, only names and kit colours. Edit the file to update squads or ratings: each player is `"Name|POS|age|rating|potential"`.
+> The real-football data in `data/` (`england.js`, `spain.js`, `italy.js`, `france.js`, `germany.js`, `netherlands.js`, `portugal.js`, `others.js`, `world.js`, `europe.js`, `nations.js`) is an unofficial, best-effort snapshot. Squads may be out of date (transfers after summer 2025 aren't included), ages are approximate, and the ratings are editorial estimates rather than official figures. Partially known squads, mostly smaller clubs, are topped up with generated players. No club crests or logos are used, only names and kit colours. Edit the file to update squads or ratings: each player is `"Name|POS|age|rating|potential"`.
 
 ## Play
 
@@ -46,4 +55,4 @@ Open `index.html` in a browser, or serve the folder (for example `python3 -m htt
 - `data/*.js`: the real-football country packs, registered on `TM_COUNTRIES`, and the Champions League pack, `TM_CONTINENTAL`. The engine builds the game worlds from whichever packs are loaded.
 - `js/engine.js`: the game rules and simulation. It doesn't touch the DOM and runs under Node.
 - `js/ui.js`: rendering and input.
-- `tests/sim.test.js`: a headless smoke test that plays 5 full seasons and checks the table, the cup and promotion/relegation. Run it with `node tests/sim.test.js [clubIndex] [seed] [fictional|england|europe] [NATION_CODE]`. Pass a nation code such as ESP to test national-team mode.
+- `tests/sim.test.js`: a headless smoke test that plays 5 full seasons and checks the table, the cup and promotion/relegation. Run it with `node tests/sim.test.js [clubIndex] [seed] [fictional|england|europe|world] [NATION_CODE]`. Pass a nation code such as ESP to test national-team mode.

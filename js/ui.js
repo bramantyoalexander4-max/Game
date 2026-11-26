@@ -188,7 +188,7 @@
       top = `<div class="card"><h2>📰 You've been sacked</h2><p>${esc(g.gameOverReason || '')}</p>
         <button class="btn primary block" data-a="new-career">Start a new career</button></div>`;
     } else if (g.seasonOver) {
-      top = `<div class="card"><h2>🏁 ${E.seasonName()} complete</h2><p>${esc(g.intl && g.intl.kind ? `${E.intlName()}: ${E.STAGE_TEXT[E.intlStage(n.id)]}.` : 'A season of friendlies is over.')}</p>
+      top = `<div class="card"><h2>🏁 ${E.seasonName()} complete</h2><p>${esc(g.intl && g.intl.kind ? `${E.intlName()}: ${g.intl.format === 'nl' ? E.nlResultText(n.id) : E.STAGE_TEXT[E.intlStage(n.id)]}.` : 'A season of friendlies is over.')}</p>
         <button class="btn primary block" data-a="end-season">See season review</button></div>`;
     } else if (E.userFixture()) {
       const fx = E.userFixture();
@@ -289,11 +289,22 @@
     const g = G(), I = g.intl;
     if (!I) return '<div class="news muted">No international football in this world.</div>';
     const me = g.userClub;
-    let html = `<div class="card"><b>${esc(I.kind ? E.intlName() : 'International friendlies')}</b><p class="small muted" style="margin:6px 0 0">${I.kind
-      ? `${I.kind === 'Euro' ? 'European' : 'All'} national teams play six qualifiers in groups of four during the international breaks. The best 24 (group winners first, then runners-up and so on) go to the tournament next summer: six groups of four, then a round of 16.`
+    const nl = I.format === 'nl';
+    let html = `<div class="card"><b>${esc(I.kind ? E.intlName() : 'International friendlies')}</b><p class="small muted" style="margin:6px 0 0">${nl
+      ? 'European national teams play in Leagues A, B and C: groups of four over the six international breaks. Group winners go up (League A winners reach the Finals next summer), bottom sides go down. Everyone else plays friendlies.'
+      : I.kind ? `${I.kind === 'Euro' ? 'European' : 'All'} national teams play six qualifiers in groups of four during the international breaks. The best 24 (group winners first, then runners-up and so on) go to the tournament next summer: six groups of four, then a round of 16.`
       : 'No tournament next summer: national teams play friendlies against sides of similar strength.'}</p></div>`;
     const tk = g.fixtures.filter((f) => f.comp === 'INT' && f.stage === 'TK');
-    if (I.qualified && I.tGroups.length) {
+    if (nl) {
+      const mine = I.groups.findIndex((grp) => grp.includes(me));
+      const order = mine >= 0 ? [mine, ...I.groups.map((_, i) => i).filter((i) => i !== mine)] : I.groups.map((_, i) => i);
+      const finals = tk.filter((f) => f.round >= 2);
+      if (finals.length) html += `<h2>Finals</h2>` + E.T_KO.map((name, j) => { const fx = finals.filter((f) => f.round === j); return fx.length ? `<b class="small muted">${name}</b><div class="list">${fx.map(fxRow).join('')}</div>` : ''; }).join('');
+      html += `<h2>Groups</h2>` + order.map((i) => {
+        const n = I.groups.slice(0, i).filter((_, k) => I.groupLeague[k] === I.groupLeague[i]).length + 1;
+        return `<b class="small muted">League ${I.groupLeague[i]} · Group ${n}${i === mine ? ' (yours)' : ''}</b>${natTable(I.groups[i], I.qTable)}`;
+      }).join('');
+    } else if (I.qualified && I.tGroups.length) {
       html += `<h2>${esc(E.intlName())} groups</h2>` + I.tGroups.map((grp, i) => `<b class="small muted">Group ${'ABCDEF'[i]}</b>${natTable(grp, I.tTable)}`).join('');
       E.T_KO.forEach((name, j) => {
         const fx = tk.filter((f) => f.round === j);

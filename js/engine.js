@@ -2,7 +2,7 @@
 (function (root) {
   'use strict';
 
-  const SAVE_VERSION = 7;
+  const SAVE_VERSION = 8;
   let G = null; // current game state
 
   // ---------- random ----------
@@ -124,6 +124,16 @@
     const worlds = [FICTIONAL];
     const keys = ['england', 'spain', 'italy', 'france', 'germany', 'netherlands', 'portugal', 'turkey', 'belgium',
       'greece', 'czechia', 'denmark', 'norway', 'azerbaijan', 'cyprus', 'kazakhstan'].filter((k) => C[k]);
+    // the World adds Scotland, Austria and Switzerland (ahead of the smaller leagues, for Champions League places)
+    // and the big leagues of the Americas and Asia
+    const worldKeys = ['england', 'spain', 'italy', 'france', 'germany', 'netherlands', 'portugal', 'scotland', 'austria',
+      'switzerland', 'turkey', 'belgium', 'greece', 'czechia', 'denmark', 'norway', 'azerbaijan', 'cyprus', 'kazakhstan',
+      'brazil', 'argentina', 'usa', 'mexico', 'saudi', 'japan', 'korea'].filter((k) => C[k]);
+    if (worldKeys.length > keys.length && ROOT.TM_CONTINENTAL) {
+      worlds.push(buildWorld('world', 'Real football — World 2025/26', 'World 2025/26',
+        `Every league in the Europe world plus Scotland, Austria, Switzerland, Brazil, Argentina, the USA (MLS), Mexico, Saudi Arabia, Japan and South Korea: ${worldKeys.length} countries. The biggest world — slower on older phones. Real clubs and players as of the start of the 2025/26 season; squads outside the big leagues are mostly generated.`,
+        worldKeys.map((k) => C[k]), ROOT.TM_CONTINENTAL));
+    }
     if (keys.length >= 2 && ROOT.TM_CONTINENTAL) {
       worlds.push(buildWorld('europe', 'Real football — Europe 2025/26', 'Europe 2025/26',
         `${keys.map((k) => C[k].leagues.map((l) => l.name).join(' & ')).join(', ')} and the Champions League. Real clubs and players as of the start of the 2025/26 season; squads may be out of date and ratings are estimates.`,
@@ -213,14 +223,14 @@
     'CAN', 'CMR', 'ALG', 'TUN', 'EGY', 'KOR', 'AUS', 'IRN', 'UKR', 'GEO', 'HUN', 'ROU', 'GRE', 'TUR', 'ENG', 'GER', 'ITA'];
   const countryCode = (country) => ((ROOT.TM_NATIONS || {}).countryCodes || {})[country];
   let natIndex = null;
-  function natOfReal(name, clubShort, country) {
+  function natOfReal(name, clubShort, country, inline) {
     const N = ROOT.TM_NATIONS;
     if (!N) return undefined;
     if (!natIndex) {
       natIndex = {};
       Object.entries(N.players).forEach(([code, str]) => str.split('|').filter(Boolean).forEach((n) => { natIndex[n] = code; }));
     }
-    return N.overrides[`${name}@${clubShort}`] || natIndex[name] || countryCode(country);
+    return N.overrides[`${name}@${clubShort}`] || inline || natIndex[name] || countryCode(country);
   }
   function genNat(country) {
     const home = country ? countryCode(country) : null;
@@ -315,7 +325,7 @@
       if (src.players) {
         src.players.forEach((str) => {
           const rp = realPlayer(str);
-          if (ds.nations) rp.nat = natOfReal(rp.name, c.short, c.country);
+          if (ds.nations) rp.nat = natOfReal(rp.name, c.short, c.country, str.split('|')[5]);
           addPlayer(rp, c.id);
         });
         // fill gaps in partially known squads with generated players: clearly below a known first team,
@@ -547,7 +557,8 @@
     if (!c) return G.intl && G.intl.kind && w < totalWeeks() ? `${intlName()} · ${tournamentRoundName(w - G.intl.tStart)}` : '';
     if (G.mode === 'national' || div < 0) {
       const f = fixturesForWeek(w).find((x) => x.comp === 'INT');
-      if (f) return `${f.stage === 'Q' ? `${intlName()} qualifier` : 'International friendly'}`;
+      if (f) return f.stage === 'F' ? 'International friendly'
+        : G.intl.format === 'nl' ? `Nations League ${G.intl.groupLeague[f.group]} · group game` : `${intlName()} qualifier`;
       return c.type === 'league' ? 'Club football' : c.type === 'cl' ? 'Champions League week' : 'Cup week';
     }
     if (c.type === 'cup') {
@@ -582,7 +593,16 @@
     return fx;
   }
   const totalWeeks = () => G.calendar.length + (G.intl ? G.intl.tWeeks : 0);
-  const fixturesForWeek = (w) => G.fixtures.filter((f) => f.week === w);
+  // fixtures indexed by week; rebuilt whenever the fixture list is replaced or grows
+  let fxIndex = { ref: null, len: -1, byWeek: null };
+  function fixturesForWeek(w) {
+    if (fxIndex.ref !== G.fixtures || fxIndex.len !== G.fixtures.length) {
+      const byWeek = {};
+      G.fixtures.forEach((f) => { (byWeek[f.week] = byWeek[f.week] || []).push(f); });
+      fxIndex = { ref: G.fixtures, len: G.fixtures.length, byWeek };
+    }
+    return fxIndex.byWeek[w] ? [...fxIndex.byWeek[w]] : [];
+  }
   const userFixture = (w = G.week) => fixturesForWeek(w).find((f) => f.home === G.userClub || f.away === G.userClub);
 
   // ---------- lineups & strength ----------
@@ -705,6 +725,7 @@
     const slot = m.lineups[s][idx].slot;
     m.lineups[s][idx] = { pid: inPid, slot };
     m.subs[s]++;
+    m.dirty = true;
     m.usedSubs[s].push(outPid, inPid);
     m.appeared.add(inPid);
     ev(m, s, 'sub', `🔁 ${club(m.sides[s]).short}: ${pname(inPid)} replaces ${pname(outPid)}${reason ? ' (' + reason + ')' : ''}`);
@@ -726,7 +747,12 @@
   function stepMatch(m, opts = {}) {
     if (m.done) return m;
     m.min++;
-    const st = m.lineups.map((lu, s) => strength(lu, m.ments[s], m.fit, s === 0));
+    // team strength changes slowly (fatigue) or on events (subs, cards, injuries): recompute every 10 minutes or when dirty
+    if (!m.st || m.dirty || m.min % 10 === 1 || m.stMents !== m.ments.join()) {
+      m.st = m.lineups.map((lu, s) => strength(lu, m.ments[s], m.fit, s === 0));
+      m.stMents = m.ments.join(); m.dirty = false;
+    }
+    const st = m.st;
     // possession
     const pm = Math.pow(st[0].mid, 4) / (Math.pow(st[0].mid, 4) + Math.pow(st[1].mid, 4));
     m.possTicks[rand() < pm ? 0 : 1]++;
@@ -763,6 +789,7 @@
       const l = pick(m.lineups[s].filter((x) => x.slot !== 'GK'));
       m.yellows[l.pid] = (m.yellows[l.pid] || 0) + 1;
       if (m.yellows[l.pid] >= 2) {
+        m.dirty = true;
         m.lineups[s] = m.lineups[s].filter((x) => x.pid !== l.pid);
         ev(m, s, 'red', `🟥 Second yellow! ${pname(l.pid)} (${club(m.sides[s]).short}) is sent off.`);
       } else ev(m, s, 'card', `🟨 ${pname(l.pid)} (${club(m.sides[s]).short}) is booked.`);
@@ -770,6 +797,7 @@
       const s = rand() < 0.5 ? 0 : 1;
       const l = pick(m.lineups[s].filter((x) => x.slot !== 'GK'));
       m.lineups[s] = m.lineups[s].filter((x) => x.pid !== l.pid);
+      m.dirty = true;
       m.yellows[l.pid] = 2;
       ev(m, s, 'red', `🟥 Straight red! ${pname(l.pid)} (${club(m.sides[s]).short}) is off.`);
     }
@@ -779,12 +807,15 @@
       const s = rand() < 0.5 ? 0 : 1;
       const l = pick(m.lineups[s]);
       m.injuries.push(l.pid);
+      m.dirty = true;
       ev(m, s, 'injury', `🚑 ${pname(l.pid)} (${club(m.sides[s]).short}) is injured.`);
       const inP = bestBench(m, s, l.slot);
       if (!(inP && makeSub(m, s, l.pid, inP.id, 'injury'))) m.lineups[s] = m.lineups[s].filter((x) => x.pid !== l.pid);
     }
-    // fatigue
-    m.lineups.forEach((lu) => lu.forEach((l) => { m.fit[l.pid] = Math.max(20, m.fit[l.pid] - (l.slot === 'GK' ? 0.06 : 0.2)); }));
+    // fatigue, applied in five-minute steps
+    if (m.min % 5 === 0) {
+      for (const lu of m.lineups) for (const l of lu) m.fit[l.pid] = Math.max(20, m.fit[l.pid] - (l.slot === 'GK' ? 0.3 : 1));
+    }
     // AI substitutions (the user's side too when they choose to sim)
     [0, 1].forEach((s) => { if (m.sides[s] !== G.userClub || opts.autoUser) aiSubs(m, s); });
     if (m.min === 45) ev(m, -1, 'info', `⏸ Half-time: ${m.score[0]}-${m.score[1]}`);
@@ -1013,7 +1044,13 @@
     ((ROOT.TM_NATIONS || {}).meta || []).forEach((row) => { const [code, name, color, conf] = row.split('|'); m[code] = { code, name, color, conf }; });
     return m;
   };
-  const eligible = (code) => Object.values(G.players).filter((p) => p.nat === code && !p.academy);
+  let natGroups = null; // nationality -> players, built once per call-up round
+  const eligible = (code) => (natGroups ? (natGroups[code] || []) : Object.values(G.players).filter((p) => p.nat === code && !p.academy));
+  function withNatGroups(fn) {
+    natGroups = {};
+    Object.values(G.players).forEach((p) => { if (p.nat && !p.academy) (natGroups[p.nat] = natGroups[p.nat] || []).push(p); });
+    try { return fn(); } finally { natGroups = null; }
+  }
   function createNations(mustInclude) {
     const meta = nationMeta();
     const counts = {};
@@ -1023,7 +1060,7 @@
       country: meta[code].name, isNation: true, div: -1, rep: 50, budget: 0,
       formation: '4-3-3', mentality: 'balanced', squad: [], lineup: [], table: blankTable(),
     }));
-    G.nations.forEach((n) => callUp(n));
+    withNatGroups(() => G.nations.forEach((n) => callUp(n)));
   }
   // the national teams a user can pick before a game exists: nations with enough real players in the data
   function previewNations(datasetId) {
@@ -1032,8 +1069,8 @@
     const meta = nationMeta();
     const pools = {};
     ds.clubs.forEach((c) => (c.players || []).forEach((str) => {
-      const [name, , , ovr] = str.split('|');
-      const code = natOfReal(name, c.short, c.country);
+      const [name, , , ovr, , inline] = str.split('|');
+      const code = natOfReal(name, c.short, c.country, inline);
       (pools[code] = pools[code] || []).push(+ovr);
     }));
     return Object.entries(pools).filter(([code, a]) => meta[code] && a.length >= 12).map(([code, a]) => {
@@ -1055,13 +1092,13 @@
     n.lineup = autoLineup(n.id);
   }
   function refreshCallUps() {
-    G.nations.forEach((n) => {
+    withNatGroups(() => G.nations.forEach((n) => {
       n.rep = nationStrength(n);
       if (n.id === G.userClub && G.mode === 'national') {
         n.squad = n.squad.filter((id) => G.players[id] && G.players[id].nat === n.code);
         validateLineup(n.id);
       } else callUp(n);
-    });
+    }));
   }
   // national-team squad management for the user
   function canCallUp(pid) {
@@ -1086,43 +1123,60 @@
   }
   function autoSquad() { callUp(userClub()); }
   const intlName = () => (G.intl && G.intl.kind ? `${G.intl.kind} ${G.intl.year}` : 'Internationals');
-  const tournamentRoundName = (k) => (k < 3 ? `Group stage ${k + 1}` : T_KO[k - 3]);
+  const tournamentRoundName = (k) => {
+    const I = G.intl, gw = I && I.groupWeeks !== undefined ? I.groupWeeks : 3;
+    return k < gw ? `Group stage ${k + 1}` : T_KO[((I && I.koStart) || 0) + k - gw];
+  };
   const nationRanking = () => [...G.nations].sort((a, b) => b.rep - a.rep);
   function intlPool(kind) { return nationRanking().filter((n) => kind !== 'Euro' || n.conf === 'UEFA'); }
   function scheduleIntl() {
     const prev = G.intl;
     const year = G.meta.startYear + G.season; // the summer that ends this season
-    const kind = year % 4 === 2 ? 'World Cup' : year % 4 === 0 ? 'Euro' : null;
+    let kind = year % 4 === 2 ? 'World Cup' : year % 4 === 0 ? 'Euro' : null;
+    const uefa = nationRanking().filter((n) => n.conf === 'UEFA');
+    if (!kind && uefa.length >= 16) kind = 'Nations League';
+    const nl = kind === 'Nations League';
     const leagueWeeks = G.calendar.map((c, i) => (c.type === 'league' ? i : -1)).filter((i) => i >= 0);
     const windows = [0.08, 0.2, 0.33, 0.46, 0.6, 0.74].map((f) => leagueWeeks[Math.floor(f * leagueWeeks.length)]);
     G.intl = { kind, year, windows, groups: [], qTable: {}, qualified: null, tGroups: [], tTable: {}, winner: null, runnerUp: null,
-      tStart: G.calendar.length, tWeeks: kind ? 3 + T_KO.length : 0,
+      tStart: G.calendar.length, tWeeks: !kind ? 0 : nl ? 2 : 3 + T_KO.length,
+      format: nl ? 'nl' : kind ? 'tournament' : 'friendlies', koStart: nl ? 2 : 0, groupWeeks: nl ? 0 : 3, groupLeague: [], nlMoves: {},
       history: prev ? prev.history : [], strikes: prev ? prev.strikes : 0 };
     refreshCallUps();
     const add = (h, a, week, extra) => G.fixtures.push({ comp: 'INT', week, home: h, away: a, played: false, hg: 0, ag: 0, ...extra });
-    if (kind) {
-      // qualifying: groups of four seeded from pots, a double round-robin over six windows
-      const pool = intlPool(kind);
+    const RR = [[[0, 1], [2, 3]], [[0, 2], [1, 3]], [[0, 3], [1, 2]]];
+    const makeGroups = (pool, label) => {
+      // groups of four seeded from pots, a double round-robin over the six windows
       const n4 = Math.floor(pool.length / 4) * 4;
       const seeded = pool.slice(0, n4), groupsN = n4 / 4;
       const pots = [0, 1, 2, 3].map((k) => shuffle(seeded.slice(k * groupsN, (k + 1) * groupsN)));
-      G.intl.groups = Array.from({ length: groupsN }, (_, g) => pots.map((pot) => pot[g].id));
-      const RR = [[[0, 1], [2, 3]], [[0, 2], [1, 3]], [[0, 3], [1, 2]]];
-      G.intl.groups.forEach((grp, g) => {
+      for (let g = 0; g < groupsN; g++) {
+        const grp = pots.map((pot) => pot[g].id);
+        const gi = G.intl.groups.push(grp) - 1;
+        G.intl.groupLeague[gi] = label;
         grp.forEach((id) => { G.intl.qTable[id] = blankTable(); });
-        for (let r = 0; r < 6; r++) RR[r % 3].forEach(([x, y]) => add(r < 3 ? grp[x] : grp[y], r < 3 ? grp[y] : grp[x], windows[r], { stage: 'Q', group: g }));
-      });
-    } else {
-      // no tournament next summer: friendlies against similar-strength sides
-      windows.forEach((w) => {
-        const order = nationRanking();
-        for (let i = 0; i + 1 < order.length; i += 2) {
-          const j = i + 2 < order.length && rand() < 0.5 ? i + 2 : i + 1;
-          [order[i + 1], order[j]] = [order[j], order[i + 1]];
-          add(order[i].id, order[i + 1].id, w, { stage: 'F' });
-        }
-      });
-    }
+        for (let r = 0; r < 6; r++) RR[r % 3].forEach(([x, y]) => add(r < 3 ? grp[x] : grp[y], r < 3 ? grp[y] : grp[x], windows[r], { stage: 'Q', group: gi }));
+      }
+    };
+    if (nl) {
+      // Nations League: European sides keep their league (A, B, C) between editions, with promotion and relegation
+      if (!G.nlLeagues) {
+        G.nlLeagues = {};
+        uefa.forEach((n, i) => { G.nlLeagues[n.id] = i < 16 ? 'A' : i < 32 ? 'B' : 'C'; });
+      }
+      uefa.forEach((n) => { if (!G.nlLeagues[n.id]) G.nlLeagues[n.id] = 'C'; });
+      ['A', 'B', 'C'].forEach((L) => makeGroups(uefa.filter((n) => G.nlLeagues[n.id] === L), L));
+    } else if (kind) makeGroups(intlPool(kind), null);
+    // everyone without a group plays friendlies against sides of similar strength
+    const busy = new Set(G.intl.groups.flat());
+    windows.forEach((w) => {
+      const order = nationRanking().filter((n) => !busy.has(n.id));
+      for (let i = 0; i + 1 < order.length; i += 2) {
+        const j = i + 2 < order.length && rand() < 0.5 ? i + 2 : i + 1;
+        [order[i + 1], order[j]] = [order[j], order[i + 1]];
+        add(order[i].id, order[i + 1].id, w, { stage: 'F' });
+      }
+    });
   }
   function intlWeek() {
     const I = G.intl;
@@ -1136,6 +1190,7 @@
   }
   function intlQualify() {
     const I = G.intl;
+    if (I.format === 'nl') { nlFinish(); return; }
     // rank every side by group finish, then points: the best 24 go to the tournament
     const ranked = [];
     I.groups.forEach((grp) => groupStandings(grp, I.qTable).forEach((id, pos) => ranked.push({ id, pos, t: I.qTable[id] })));
@@ -1154,10 +1209,42 @@
       pushNews(I.qualified.includes(G.userClub) ? `🌍 Qualified for the ${intlName()}!` : `💔 ${userClub().name} have failed to qualify for the ${intlName()}.`);
     } else pushNews(`🌍 The ${intlName()} line-up is set: ${seeded.slice(0, 6).map((id) => club(id).name).join(', ')} are among the favourites.`);
   }
+  function nlFinish() {
+    // group winners of League A reach the Finals; promotion and relegation between leagues
+    const I = G.intl;
+    const winnersA = [], tops = { A: [], B: [], C: [] }, bottoms = { A: [], B: [], C: [] };
+    I.groups.forEach((grp, g) => {
+      const st = groupStandings(grp, I.qTable);
+      const L = I.groupLeague[g];
+      if (L === 'A') winnersA.push(st[0]);
+      tops[L].push(st[0]); bottoms[L].push(st[3]);
+    });
+    // swap equal numbers across each boundary so the leagues keep their size
+    const t = (id) => I.qTable[id];
+    const best = (a, b) => t(b).pts - t(a).pts || (t(b).gf - t(b).ga) - (t(a).gf - t(a).ga) || t(b).gf - t(a).gf;
+    [['A', 'B'], ['B', 'C']].forEach(([hi, lo]) => {
+      const up = [...tops[lo]].sort(best), down = [...bottoms[hi]].sort(best).reverse();
+      const k = Math.min(up.length, down.length);
+      up.slice(0, k).forEach((id) => { I.nlMoves[id] = 'up'; G.nlLeagues[id] = hi; });
+      down.slice(0, k).forEach((id) => { I.nlMoves[id] = 'down'; G.nlLeagues[id] = lo; });
+    });
+    I.qualified = winnersA.sort((a, b) => club(b).rep - club(a).rep).slice(0, 4);
+    if (I.qualified.length === 4) {
+      [[0, 3], [1, 2]].forEach(([x, y], tie) => G.fixtures.push({ comp: 'INT', stage: 'TK', round: 2, tie, ko: true, week: I.tStart,
+        home: I.qualified[x], away: I.qualified[y], played: false, hg: 0, ag: 0 }));
+    }
+    const me = G.userClub;
+    if (G.mode === 'national' && G.nlLeagues[me]) {
+      const mv = I.nlMoves[me];
+      pushNews(I.qualified.includes(me) ? `🌍 Group winners! ${userClub().name} are in the ${intlName()} Finals.`
+        : mv === 'up' ? `⬆️ Promoted to Nations League ${G.nlLeagues[me]}!` : mv === 'down' ? `⬇️ Relegated to Nations League ${G.nlLeagues[me]}.`
+          : `The Nations League group stage is over: ${userClub().name} stay in League ${G.nlLeagues[me]}.`);
+    } else pushNews(`🌍 ${I.qualified.map((id) => club(id).name).join(', ')} reach the ${intlName()} Finals.`);
+  }
   function intlDraw(week) {
     const I = G.intl;
-    const j = week - I.tStart - 3;
-    if (!I.kind || !I.qualified || j < 0 || j >= T_KO.length) return;
+    const j = (I.koStart || 0) + week - I.tStart - (I.groupWeeks === undefined ? 3 : I.groupWeeks);
+    if (!I.kind || !I.qualified || j < (I.koStart || 0) || j >= T_KO.length) return;
     if (G.fixtures.some((f) => f.comp === 'INT' && f.stage === 'TK' && f.round === j)) return;
     const add = (pairs) => pairs.forEach(([h, a], tie) => G.fixtures.push({ comp: 'INT', stage: 'TK', round: j, tie, ko: true, week, home: h, away: a, played: false, hg: 0, ag: 0 }));
     if (j === 0) {
@@ -1215,6 +1302,7 @@
   }
   const STAGE_TEXT = ['Did not qualify', 'Group stage', 'Round of 16', 'Quarter-finals', 'Semi-finals', 'Runners-up', 'Winners'];
   function intlExpectation(id = G.userClub, kind = G.intl && G.intl.kind) {
+    if (kind === 'Nations League') return 0;
     const rank = intlPool(kind).findIndex((n) => n.id === id) + 1;
     if (!rank) return 0;
     return rank <= 4 ? 3 : rank <= 12 ? 2 : rank <= T_TEAMS ? 1 : 0;
@@ -1223,6 +1311,12 @@
   function intlOutlook() {
     if (!G.intl) return '';
     const rank = nationRanking().findIndex((n) => n.id === G.userClub) + 1;
+    if (G.intl.format === 'nl') {
+      const L = G.nlLeagues && G.nlLeagues[G.userClub];
+      return L ? `Nations League season: you're in League ${L}. Win your group to ${L === 'A' ? 'reach the Finals' : 'go up'}; finish bottom and you go down. (World ranking: ${ordinal(rank)})`
+        : `No tournament for your confederation next summer, just friendlies. (World ranking: ${ordinal(rank)})`;
+    }
+    if (G.intl.kind === 'Euro' && userClub().conf !== 'UEFA') return `Euro ${G.intl.year} is for European sides only: friendlies for you. (World ranking: ${ordinal(rank)})`;
     return G.intl.kind
       ? `The ${intlName()} is next summer. The federation's target: ${EXPECT_TEXT[intlExpectation()].toLowerCase()}. (World ranking: ${ordinal(rank)})`
       : `No tournament next summer, just friendlies. (World ranking: ${ordinal(rank)})`;
@@ -1231,11 +1325,34 @@
     if (!G.intl || !G.intl.kind) return null;
     return { kind: G.intl.kind, year: G.intl.year, name: intlName(),
       winner: G.intl.winner !== null ? club(G.intl.winner).name : '-', runnerUp: G.intl.runnerUp !== null ? club(G.intl.runnerUp).name : '-',
-      mine: G.mode === 'national' ? STAGE_TEXT[intlStage(G.userClub)] : null };
+      mine: G.mode === 'national' ? (G.intl.format === 'nl' ? nlResultText(G.userClub) : STAGE_TEXT[intlStage(G.userClub)]) : null };
+  }
+  function nlResultText(id) {
+    const I = G.intl;
+    if (I.winner === id) return 'Nations League winners';
+    if (I.runnerUp === id) return 'Nations League runners-up';
+    if (I.qualified && I.qualified.includes(id)) return 'Nations League semi-finals';
+    if (!G.nlLeagues || !G.nlLeagues[id]) return 'Friendlies only';
+    const mv = I.nlMoves[id];
+    return mv === 'up' ? `Promoted to League ${G.nlLeagues[id]}` : mv === 'down' ? `Relegated to League ${G.nlLeagues[id]}` : `Stayed in League ${G.nlLeagues[id]}`;
   }
   function nationalVerdict(summary) {
     const I = G.intl;
-    if (!I || !I.kind) {
+    const me = userClub();
+    if (I && I.format === 'nl' && G.nlLeagues && G.nlLeagues[me.id]) {
+      const res = nlResultText(me.id);
+      if (I.winner === me.id) { I.strikes = 0; summary.verdict = 'Nations League winners! The federation is delighted.'; }
+      else if (I.nlMoves[me.id] === 'down') summary.verdict = 'Relegation in the Nations League. The federation is disappointed, but the tournaments are what count.';
+      else summary.verdict = I.nlMoves[me.id] === 'up' ? 'Promotion! The federation is pleased.' : 'A steady Nations League campaign. The federation is satisfied.';
+      G.history.push({ season: G.season, national: true, result: `${intlName()}: ${res}` });
+      return;
+    }
+    if (I && I.kind === 'Euro' && me.conf !== 'UEFA') {
+      summary.verdict = 'No tournament for your confederation this summer: a year of friendlies.';
+      G.history.push({ season: G.season, national: true, result: 'Friendlies only' });
+      return;
+    }
+    if (!I || !I.kind || I.format === 'nl') {
       summary.verdict = 'A year of friendlies. The federation looks ahead to the next tournament.';
       G.history.push({ season: G.season, national: true, result: 'Friendlies only' });
       return;
@@ -1583,6 +1700,7 @@
       G.clNext = [];
       divs.forEach((d) => { G.clNext.push(...tables[d].slice(0, G.meta.cl.slots[d] || 0).map((c) => c.id)); });
       G.clNext.push(...G.clubs.filter((c) => c.div === 0).map((c) => c.id));
+      G.clNext = G.clNext.slice(0, 36); // the league phase needs 36 (later leagues' places drop off first)
       summary.qualified = G.clNext.includes(G.userClub);
     }
     divs.forEach((d) => {
@@ -1645,7 +1763,8 @@
       p.seasonStart = p.ovr; p.playTime = 0;
     });
     Object.values(G.players).forEach((p) => {
-      const retireP = p.age >= 37 ? 1 : p.age >= 34 ? 0.35 : 0;
+      // veterans retire gradually; the best of them play on into their late thirties
+      const retireP = p.age >= 41 ? 1 : p.age >= 37 ? (p.ovr >= 75 ? 0.4 : 0.8) : p.age >= 34 ? (p.ovr >= 78 ? 0.15 : 0.35) : 0;
       if (rand() < retireP) {
         if (p.club === G.userClub) summary.retired.push(`${p.name} (${p.age})`);
         if (p.club !== null) {
@@ -1659,7 +1778,7 @@
     Object.values(G.players).forEach((p) => {
       if (p.club === null || p.academy) return;
       if (p.contract <= 1 && p.club !== G.userClub) {
-        const keep = p.age <= 29 ? 0.8 : p.age <= 32 ? 0.55 : 0.3;
+        const keep = p.age <= 29 ? 0.8 : p.age <= 32 ? 0.55 : p.ovr >= 75 ? 0.6 : 0.3;
         if (rand() < keep) { p.contract = defaultContract(p) + 1; p.wage = Math.max(p.wage, wageFor(p)); }
       }
       p.contract--;
@@ -1709,7 +1828,12 @@
     }
     // refresh free agent pool
     while (G.freeAgents.length < 20) addPlayer(genPlayer(pick(['GK', 'DF', 'MF', 'FW']), ri(55, 72), 19, 32), null);
-    if (G.freeAgents.length > 40) G.freeAgents.splice(0, G.freeAgents.length - 40).forEach((id) => delete G.players[id]);
+    // cap the pool by letting the weakest free agents drift out of the game (never the stars)
+    const faCap = Math.max(40, Math.round(G.clubs.length * 0.5));
+    if (G.freeAgents.length > faCap) {
+      G.freeAgents.sort((a, b) => G.players[b].ovr - G.players[a].ovr);
+      G.freeAgents.splice(faCap).forEach((id) => { if (!(G.nations || []).some((n) => n.squad.includes(id))) delete G.players[id]; });
+    }
 
     G.clubs.forEach((c) => { c.lineup = autoLineup(c.id); });
     (G.nations || []).forEach((n) => { n.squad = n.squad.filter((id) => G.players[id]); });
@@ -1750,7 +1874,7 @@
   function serialize() { return JSON.stringify(G); }
   function load(json) {
     const data = typeof json === 'string' ? JSON.parse(json) : json;
-    if (!data || ![2, 3, 4, 5, 6, SAVE_VERSION].includes(data.version)) throw new Error('Incompatible save');
+    if (!data || ![2, 3, 4, 5, 6, 7, SAVE_VERSION].includes(data.version)) throw new Error('Incompatible save');
     G = data;
     if (G.version === 2) {
       // v2 saves had no contracts or academy
@@ -1794,6 +1918,11 @@
     if (G.version === 6) {
       // v6 saves had no national teams
       G.mode = 'club'; G.nations = []; G.intl = null;
+      G.version = 7;
+    }
+    if (G.version === 7) {
+      // v7 had no Nations League; the international setup carries on as scheduled
+      if (G.intl) Object.assign(G.intl, { format: G.intl.kind ? 'tournament' : 'friendlies', koStart: 0, groupWeeks: 3, groupLeague: [], nlMoves: {} });
       G.version = SAVE_VERSION;
     }
     return G;
@@ -1812,7 +1941,7 @@
     meta, cupName, divName, divCountry, leagueDivs, zoneInfo, seasonName, promotedCount, cupResult, weekLabel,
     clName, clResult, clStandings, tiePrize, userCupIdx, cupOfCountry, CL_KO_ROUNDS,
     NATION_BASE, INTL_SQUAD, T_KO, STAGE_TEXT, EXPECT_TEXT, nationMeta, nationRanking, eligible, canCallUp, callUpPlayer, dropPlayer,
-    autoSquad, previewNations, intlName, intlStage, intlExpectation, intlOutlook, groupStandings, tournamentRoundName,
+    autoSquad, previewNations, nlResultText, intlName, intlStage, intlExpectation, intlOutlook, groupStandings, tournamentRoundName,
     ACADEMY_MAX, ACADEMY_GRAD_AGE, RENEW_WINDOW, academyUpgradeCost, academyUpkeep, academyIntake, prospects,
     potentialRange, upgradeAcademy, promoteProspect, releaseProspect,
     contractEnds, canNegotiate, offerContract, expiringPlayers, signingLength,
