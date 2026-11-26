@@ -12,7 +12,7 @@
     squadSort: 'pos', squadView: 'team', neg: null,
     tacticSel: null, // index into lineup, or 'b:<pid>' for a bench player
     marketPos: 'ALL', marketMax: 0, marketQuery: '',
-    leagueView: 'table', resultsWeek: null, leagueDiv: null,
+    leagueView: 'table', resultsWeek: null, leagueDiv: null, dataset: null, mname: 'Manager',
     match: null, matchTimer: null, matchSpeed: 1, matchSel: null, matchPaused: false,
   };
 
@@ -58,7 +58,6 @@
 
   // ---------- start screen ----------
   function renderStart(showClubs) {
-    const clubs = E.CLUBS;
     if (!showClubs && hasSave()) {
       app.innerHTML = `<div class="start">
         <div class="logo"><h1>⚽ Touchline <span>Manager</span></h1><p class="muted">Build a dynasty from the dugout.</p></div>
@@ -67,17 +66,28 @@
       </div>`;
       return;
     }
+    const sets = E.datasets();
+    if (!ui.dataset) ui.dataset = (sets.find((d) => d.id !== 'fictional') || sets[0]).id;
+    const ds = E.getDataset(ui.dataset);
+    const clubs = ds.clubs;
+    const label = (c) => {
+      const same = clubs.filter((x) => x.div === c.div).sort((a, b) => b.rep - a.rep);
+      const rank = same.indexOf(c) + 1, n = same.length;
+      if (c.div === 1) return rank <= 3 ? 'Title contender' : rank <= n - 5 ? 'Mid-table' : 'Relegation fight';
+      return rank <= Math.ceil(n / 3) ? 'Promotion hopeful' : 'Long-term project';
+    };
     app.innerHTML = `<div class="start">
       <div class="logo"><h1>⚽ Touchline <span>Manager</span></h1><p class="muted">Pick a club and lead them to glory.</p></div>
       <div class="card"><label class="muted small">Manager name</label><br>
-        <input id="mname" maxlength="24" placeholder="Your name" style="width:100%;margin-top:6px" value="Manager"></div>
-      <h2>Choose your club</h2>
-      ${[1, 2].map((div) => `<h2>Division ${div}</h2><div class="list">${clubs.map((c, i) => (c.div !== div ? '' : `
+        <input id="mname" maxlength="24" placeholder="Your name" style="width:100%;margin-top:6px" value="${esc(ui.mname)}"></div>
+      <h2>Game world</h2>
+      <div class="btns" style="margin-bottom:6px">${sets.map((d) => `<button class="btn ${d.id === ds.id ? 'on' : ''}" data-a="dataset" data-id="${esc(d.id)}">${esc(d.short || d.name)}</button>`).join('')}</div>
+      <p class="small muted">${esc(ds.note || '')}</p>
+      ${[1, 2].map((div) => `<h2>${esc(ds.divNames[div - 1])}</h2><div class="list">${clubs.map((c, i) => (c.div !== div ? '' : `
         <div class="item tap" data-a="pick-club" data-i="${i}">
-          <div class="crest" style="background:${c.color}">${c.short}</div>
-          <div class="grow"><div class="name">${c.name}</div><div class="stars">${stars(c.rep)}</div></div>
-          <div class="muted small">${div === 1 ? (i < 3 ? 'Title contender' : i < 8 ? 'Mid-table' : 'Relegation fight')
-            : (i < 15 ? 'Promotion hopeful' : 'Long-term project')}</div>
+          <div class="crest" style="background:${esc(c.color)}">${esc(c.short)}</div>
+          <div class="grow"><div class="name">${esc(c.name)}</div><div class="stars">${stars(c.rep)}</div></div>
+          <div class="muted small">${label(c)}</div>
         </div>`)).join('')}</div>`).join('')}
       </div>`;
   }
@@ -93,7 +103,7 @@
     const body = { home: viewHome, squad: viewSquad, tactics: viewTactics, league: viewLeague, transfers: viewTransfers, club: viewClub }[ui.tab]();
     app.innerHTML = `
       <div class="top">${crest(c)}
-        <div class="title"><b>${esc(c.name)}</b><small>Season ${G().season} · Week ${Math.min(G().week + 1, E.totalWeeks())}/${E.totalWeeks()} · Div ${c.div} · ${E.ordinal(E.position(c.id))}</small></div>
+        <div class="title"><b>${esc(c.name)}</b><small>${E.seasonName()} · Week ${Math.min(G().week + 1, E.totalWeeks())}/${E.totalWeeks()} · ${esc(E.divName(c.div))} · ${E.ordinal(E.position(c.id))}</small></div>
         <div class="money">${M(c.budget)}<small>budget</small></div>
       </div>
       <main>${body}</main>
@@ -110,11 +120,13 @@
         <button class="btn primary block" data-a="new-career">Start a new career</button></div>`;
     } else if (g.seasonOver) {
       const champ = E.standings()[0];
-      top = `<div class="card"><h2>🏁 Season ${g.season} complete</h2>
-        <p>${esc(champ.name)} are Division ${E.userClub().div} champions. You finished <b>${E.ordinal(E.position(g.userClub))}</b> (board expected ${E.ordinal(E.expectedPosition())}).</p>
+      top = `<div class="card"><h2>🏁 ${E.seasonName()} complete</h2>
+        <p>${esc(champ.name)} are ${esc(E.divName(E.userClub().div))} champions. You finished <b>${E.ordinal(E.position(g.userClub))}</b> (board expected ${E.ordinal(E.expectedPosition())}).</p>
         <button class="btn primary block" data-a="end-season">See season review</button></div>`;
     } else if (!E.userFixture()) {
-      const cupNote = g.cup.alive.includes(g.userClub) ? 'You have a bye this round.' : `You're out of the ${E.CUP_NAME}.`;
+      const cupWeek = g.calendar[g.week].type === 'cup';
+      const cupNote = !cupWeek ? `There's no ${esc(E.divName(E.userClub().div))} game this week.`
+        : g.cup.alive.includes(g.userClub) ? 'You have a bye this round.' : `You're out of the ${esc(E.cupName())}.`;
       top = `<div class="card"><div class="small muted">${esc(E.weekLabel(g.week))}</div>
         <h2>No match this week</h2><p class="muted">${cupNote} The squad gets a week to rest.</p>
         <button class="btn primary block" data-a="skip-week">⏩ Continue</button></div>`;
@@ -124,13 +136,13 @@
       const cup = fx.comp === 'CUP';
       const lineup = E.validateLineup(g.userClub);
       top = `<div class="card">
-        <div class="row between small muted"><span>${cup ? '🏆 ' : `Division ${E.userClub().div} · `}${esc(E.weekLabel(g.week))}</span><span>${fx.home === g.userClub ? 'Home' : 'Away'}</span></div>
+        <div class="row between small muted"><span>${cup ? '🏆 ' : `${esc(E.divName(E.userClub().div))} · `}${esc(E.weekLabel(g.week))}</span><span>${fx.home === g.userClub ? 'Home' : 'Away'}</span></div>
         <div class="fixture" style="margin:12px 0">
           <div class="side">${crest(h)}<b>${esc(h.name)}</b><span class="strength">Str ${E.clubStrength(h.id)} · ${clubPos(h)}</span>${formHtml(h.table.form)}</div>
           <div class="vs">vs</div>
           <div class="side">${crest(a)}<b>${esc(a.name)}</b><span class="strength">Str ${E.clubStrength(a.id)} · ${clubPos(a)}</span>${formHtml(a.table.form)}</div>
         </div>
-        ${cup ? `<p class="small" style="text-align:center;color:var(--accent2)">Knockout: a draw goes to penalties. Winning is worth ${M(E.CUP_PRIZE[fx.round])}.</p>` : ''}
+        ${cup ? `<p class="small" style="text-align:center;color:var(--accent2)">Knockout: a draw goes to penalties. Winning is worth ${M(g.cup.prizes[fx.round])}.</p>` : ''}
         <p class="small muted" style="text-align:center">${E.userClub().formation} · ${E.userClub().mentality} · ${lineup.length}/11 picked</p>
         <div class="btns"><button class="btn primary" data-a="play-live">▶ Play match</button><button class="btn" data-a="play-quick">⏩ Quick sim</button></div>
       </div>`;
@@ -147,7 +159,7 @@
     }).join('')}` : '';
     return top + offersHtml + lastHtml + `<h2>Inbox</h2><div class="list">${news || '<div class="news muted">No news yet.</div>'}</div>`;
   }
-  const clubPos = (c) => `${E.ordinal(E.position(c.id))} in Div ${c.div}`;
+  const clubPos = (c) => `${E.ordinal(E.position(c.id))} · ${esc(E.divName(c.div))}`;
   // the fixtures a user cares about in a week: their division's games, or the cup ties
   function relevantFixtures(w, div = E.userClub().div) {
     const fx = E.fixturesForWeek(w);
@@ -391,14 +403,14 @@
     const views = [['table', 'Table'], ['fixtures', 'Fixtures'], ['cup', 'Cup'], ['stats', 'Scorers']];
     const toggle = `<div class="btns" style="margin-bottom:10px">${views.map(([k, l]) =>
       `<button class="btn ${ui.leagueView === k ? 'on' : ''}" data-a="league-view" data-v="${k}">${l}</button>`).join('')}</div>`;
-    const divChips = `<div class="chips">${[1, 2].map((d) => `<button class="btn ${div === d ? 'on' : ''}" data-a="league-div" data-d="${d}">Division ${d}</button>`).join('')}</div>`;
+    const divChips = `<div class="chips">${[1, 2].map((d) => `<button class="btn ${div === d ? 'on' : ''}" data-a="league-div" data-d="${d}">${esc(E.divName(d))}</button>`).join('')}</div>`;
     if (ui.leagueView === 'fixtures') {
       const w = ui.resultsWeek === null ? Math.min(g.week, E.totalWeeks() - 1) : ui.resultsWeek;
       const fx = relevantFixtures(w, div);
       const cupWeek = g.calendar[w].type === 'cup';
       return toggle + (cupWeek ? '' : divChips) + `<div class="row between" style="margin-bottom:8px">
           <button class="btn" data-a="week" data-d="-1" ${w <= 0 ? 'disabled' : ''}>◀</button>
-          <b>${esc(E.weekLabel(w))}</b>
+          <b>${esc(E.weekLabel(w, div))}</b>
           <button class="btn" data-a="week" data-d="1" ${w >= E.totalWeeks() - 1 ? 'disabled' : ''}>▶</button></div>
         <div class="list">${fx.map(fxRow).join('') || `<div class="news muted">${cupWeek ? 'The draw for this round has not been made yet.' : 'No fixtures.'}</div>`}</div>`;
     }
@@ -411,15 +423,15 @@
         </table>${ps.length ? '' : '<div class="news muted">No goals yet.</div>'}</div><p class="small muted">Goals include cup matches.</p>`;
     }
     const table = E.standings(div);
-    const n = table.length, k = E.PROMOTED;
+    const n = table.length, k = E.promotedCount();
     const zone = (i) => (div === 1 && i >= n - k ? 'zone-down' : div === 2 && i < k ? 'zone-up' : '');
     const mine = E.userClub().div === div;
     const exp = E.expectedPosition();
     const note = !mine ? '' : `<p class="small muted">Board expectation: finish ${E.ordinal(exp)} or better.
-      ${div === 1 ? `The bottom ${k} are relegated to Division 2.` : `The top ${k} are promoted to Division 1.`}
+      ${div === 1 ? `The bottom ${k} are relegated to the ${esc(E.divName(2))}.` : `The top ${k} are promoted to the ${esc(E.divName(1))}.`}
       ${[exp + 5 <= n ? `finishing ${E.ordinal(exp + 5)} or lower` : '', div === 1 && exp <= n - k - 3 ? 'being relegated' : '']
         .filter(Boolean).map((x, i, a) => (i ? ' or ' : '') + x).join('').replace(/^./, (c) => c.toUpperCase()).replace(/(.+)/, '$1 gets you sacked.')}
-      Winning the ${E.CUP_NAME} saves your job.</p>`;
+      Winning the ${esc(E.cupName())} saves your job.</p>`;
     return toggle + divChips + `<div class="list"><table>
       <tr><th>#</th><th class="l">Club</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th><th>Form</th></tr>
       ${table.map((c, i) => `<tr class="${c.id === g.userClub ? 'me' : ''} ${zone(i)}">
@@ -431,15 +443,15 @@
   }
   function viewCup() {
     const g = G();
-    const status = g.cup.winner !== null ? `🏆 ${esc(E.club(g.cup.winner).name)} won the ${E.CUP_NAME}.`
-      : g.cup.alive.includes(g.userClub) ? `You're still in the ${E.CUP_NAME}.` : `You're out: ${esc(E.cupResult(g.userClub).toLowerCase())}.`;
+    const status = g.cup.winner !== null ? `🏆 ${esc(E.club(g.cup.winner).name)} won the ${esc(E.cupName())}.`
+      : g.cup.alive.includes(g.userClub) ? `You're still in the ${esc(E.cupName())}.` : `You're out: ${esc(E.cupResult(g.userClub).toLowerCase())}.`;
     const rounds = g.calendar.map((c, w) => ({ ...c, w })).filter((c) => c.type === 'cup');
-    return `<div class="card"><b>${E.CUP_NAME}</b><p class="small muted" style="margin:6px 0">
-        A knockout for all ${g.clubs.length} clubs. The ${g.cup.byes.length} top-rated Division 1 sides skip the first round.
+    return `<div class="card"><b>${esc(E.cupName())}</b><p class="small muted" style="margin:6px 0">
+        A knockout for all ${g.clubs.length} clubs.${g.cup.byes.length ? ` The ${g.cup.byes.length} top-rated sides skip the first round.` : ''}
         A draw after 90 minutes goes to penalties.</p><p style="margin:0">${status}</p></div>
       ${rounds.map((r) => {
         const fx = E.fixturesForWeek(r.w);
-        return `<h2>${E.CUP_ROUNDS[r.round]} <span class="small muted">· week ${r.w + 1} · win ${M(E.CUP_PRIZE[r.round])}</span></h2>
+        return `<h2>${g.cup.rounds[r.round]} <span class="small muted">· week ${r.w + 1} · win ${M(g.cup.prizes[r.round])}</span></h2>
           <div class="list">${fx.map(fxRow).join('') || '<div class="news muted">Not drawn yet.</div>'}</div>`;
       }).join('')}`;
   }
@@ -483,10 +495,10 @@
       <div class="btns">${Object.keys(E.INTENSITY).map((k) => `<button class="btn ${g.training === k ? 'on' : ''}" data-a="training" data-k="${k}">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div>
       <p class="small muted">Harder training develops young players faster, but players recover less fitness and get injured more.</p>
       <h2>History</h2>
-      <div class="list">${g.history.length ? g.history.map((h) => `<div class="item"><div class="grow">Season ${h.season}<div class="small muted">Cup: ${esc(h.cup)}</div></div>
-        <b>${E.ordinal(h.position)} · Div ${h.division}${h.move === 'up' ? ' ⬆️' : h.move === 'down' ? ' ⬇️' : ''}</b><span class="muted small">${h.points} pts</span></div>`).join('') : '<div class="news muted">Your first season is under way.</div>'}</div>
+      <div class="list">${g.history.length ? g.history.map((h) => `<div class="item"><div class="grow">${E.seasonName(h.season)}<div class="small muted">Cup: ${esc(h.cup)}</div></div>
+        <b>${E.ordinal(h.position)} · ${esc(E.divName(h.division))}${h.move === 'up' ? ' ⬆️' : h.move === 'down' ? ' ⬇️' : ''}</b><span class="muted small">${h.points} pts</span></div>`).join('') : '<div class="news muted">Your first season is under way.</div>'}</div>
       ${(g.awards || []).length ? `<h2>🏅 Golden Boy winners</h2><div class="list">${g.awards.map((a) => `<div class="item ${a.mine ? 'sel' : ''}">
-        <div class="grow">Season ${a.season}<div class="small muted">${esc(a.club)}</div></div><b>${esc(a.name)}</b><span class="muted small">${a.ovr}</span></div>`).join('')}</div>` : ''}
+        <div class="grow">${E.seasonName(a.season)}<div class="small muted">${esc(a.club)}</div></div><b>${esc(a.name)}</b><span class="muted small">${a.ovr}</span></div>`).join('')}</div>` : ''}
       <h2>Game</h2>
       <div class="btns"><button class="btn" data-a="save">💾 Save</button><button class="btn danger" data-a="new-career">New career</button></div>
       <p class="small muted">Progress also saves automatically after every matchday (in this browser).</p>`;
@@ -607,12 +619,12 @@
   function seasonReview() {
     const s = E.endSeason();
     save();
-    openModal(`<h2 style="margin-top:0">Season ${s.season} review</h2>
+    openModal(`<h2 style="margin-top:0">${E.seasonName(s.season)} review</h2>
       <div class="kv">
-        <span>Division 1 champions</span><span>🏆 ${esc(s.champion)}</span>
-        <span>Division 2 champions</span><span>${esc(s.d2Champion)}</span>
-        <span>${E.CUP_NAME}</span><span>🏆 ${esc(s.cupWinner)}</span>
-        <span>Your finish</span><span>${E.ordinal(s.position)} in Div ${s.division} (${s.points} pts)</span>
+        <span>${esc(E.divName(1))} champions</span><span>🏆 ${esc(s.champion)}</span>
+        <span>${esc(E.divName(2))} champions</span><span>${esc(s.d2Champion)}</span>
+        <span>${esc(E.cupName())}</span><span>🏆 ${esc(s.cupWinner)}</span>
+        <span>Your finish</span><span>${E.ordinal(s.position)} in the ${esc(E.divName(s.division))} (${s.points} pts)</span>
         <span>Your cup run</span><span>${esc(s.cup)}</span>
         <span>Board target</span><span>${E.ordinal(s.expected)}</span>
         <span>Prize money</span><span>${M(s.prize)}</span>
@@ -620,8 +632,8 @@
       </div>
       ${s.goldenBoy ? `<div class="wkcard">🏅 <b>Golden Boy:</b> ${esc(s.goldenBoy)}${s.goldenBoyMine ? ' <b>(your player!)</b> Your club\'s reputation grows.' : ''}
         ${s.nominees.length ? `<div class="small muted">Also nominated: ${s.nominees.map(esc).join(', ')}</div>` : ''}</div>` : ''}
-      ${s.move === 'up' ? '<p style="color:var(--accent);font-weight:800">⬆️ PROMOTED TO DIVISION 1!</p>' : ''}
-      ${s.move === 'down' ? '<p style="color:var(--bad);font-weight:800">⬇️ Relegated to Division 2.</p>' : ''}
+      ${s.move === 'up' ? `<p style="color:var(--accent);font-weight:800">⬆️ PROMOTED TO THE ${esc(E.divName(1).toUpperCase())}!</p>` : ''}
+      ${s.move === 'down' ? `<p style="color:var(--bad);font-weight:800">⬇️ Relegated to the ${esc(E.divName(2))}.</p>` : ''}
       <p><b>${esc(s.verdict)}</b></p>
       <p class="small muted">⬆️ Up: ${s.promoted.map(esc).join(', ')} · ⬇️ Down: ${s.relegated.map(esc).join(', ')}</p>
       ${s.retired.length ? `<p class="small"><b>Retired:</b> ${s.retired.map(esc).join(', ')}</p>` : ''}
@@ -647,11 +659,12 @@
         else reset();
         break;
       }
+      case 'dataset': ui.dataset = d.id; renderStart(true); window.scrollTo(0, 0); break;
       case 'ask-yes': { const c = pendingConfirm; pendingConfirm = null; closeModal(); if (c && c.onYes) c.onYes(); break; }
       case 'ask-no': { const c = pendingConfirm; pendingConfirm = null; closeModal(); if (c && c.onNo) c.onNo(); break; }
       case 'pick-club': {
         const name = (document.getElementById('mname').value || 'Manager').trim().slice(0, 24) || 'Manager';
-        E.newGame(+d.i, name);
+        E.newGame(+d.i, name, undefined, ui.dataset);
         ui.tab = 'home'; ui.leagueDiv = null; save(); render(); break;
       }
       case 'tab': ui.tab = d.t; ui.tacticSel = null; render(); window.scrollTo(0, 0); break;
@@ -767,6 +780,7 @@
     }
   });
   document.addEventListener('input', (e) => {
+    if (e.target.id === 'mname') ui.mname = e.target.value;
     if (e.target.id === 'mq') {
       ui.marketQuery = e.target.value;
       const pos = e.target.selectionStart;

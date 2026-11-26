@@ -2,7 +2,12 @@
 
 A football management game that runs in the browser. It has no dependencies and no build step, and works on phones and desktops.
 
-Take charge of one of 12 fictional clubs and manage the squad, tactics, transfers and finances across as many seasons as the board allows.
+Take charge of a club and manage the squad, tactics, transfers and finances across as many seasons as the board allows. There are two game worlds:
+
+- **England 2025/26:** the real Premier League (20 clubs) and Championship (24 clubs), with 761 real players as of the start of the 2025/26 season. Three clubs go up and three go down each season. The season is 38 or 46 matchdays plus a 6-round cup.
+- **Fictional:** 24 invented clubs in two divisions of 12, with randomly generated players.
+
+> The real-football data in `data/england.js` is an unofficial, best-effort snapshot. Squads may be out of date (transfers after summer 2025 aren't included), ages are approximate, and the ratings are editorial estimates rather than official figures. Partially known Championship squads are topped up with generated players. No club crests or logos are used, only names and kit colours. Edit the file to update squads or ratings: each player is `"Name|POS|age|rating|potential"`.
 
 ## Play
 
@@ -25,6 +30,7 @@ Open `index.html` in a browser, or serve the folder (for example `python3 -m htt
 
 ## Code
 
+- `data/england.js`: the real-football data pack. Other packs can be added the same way, by registering on `TM_DATASETS`.
 - `js/engine.js`: the game rules and simulation. It doesn't touch the DOM and runs under Node.
 - `js/ui.js`: rendering and input.
-- `tests/sim.test.js`: a headless smoke test that plays 5 full seasons and checks the table, the cup and promotion/relegation. Run it with `node tests/sim.test.js [clubIndex] [seed]`.
+- `tests/sim.test.js`: a headless smoke test that plays 5 full seasons and checks the table, the cup and promotion/relegation. Run it with `node tests/sim.test.js [clubIndex] [seed] [fictional|england]`.

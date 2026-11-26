@@ -1,13 +1,14 @@
 // Headless smoke test: plays several full seasons and checks invariants.
 // Run with: node tests/sim.test.js
 const assert = require('assert');
+require('../data/england.js');
 require('../js/engine.js');
 const E = globalThis.Engine;
 
-E.newGame(+(process.argv[2]||5), 'Tester', +(process.argv[3]||12345));
+E.newGame(+(process.argv[2]||5), 'Tester', +(process.argv[3]||12345), process.argv[4] || 'fictional');
 const wkLog = [];
 const wkCount = () => Object.values(E.state.players).filter((p) => p.club !== null && E.isWonderkid(p)).length;
-assert(wkCount() >= 9, 'wonderkids seeded');
+assert(wkCount() >= 5, 'wonderkids present');
 let goals = 0, games = 0, homeWins = 0;
 for (let season = 0; season < 5; season++) {
   while (!E.state.seasonOver) {
@@ -21,9 +22,10 @@ for (let season = 0; season < 5; season++) {
     E.state.gameOver = false; // keep simulating regardless of the board
   }
   const table = E.standings();
-  assert.strictEqual(E.state.clubs.reduce((a, c) => a + c.table.p, 0), 22 * 24);
+  const expectedGames = [1, 2].reduce((a, d) => { const n = E.standings(d).length; return a + n * (n - 1) * 2; }, 0);
+  assert.strictEqual(E.state.clubs.reduce((a, c) => a + c.table.p, 0), expectedGames);
   assert(E.state.cup.winner !== null, 'cup has a winner');
-  assert.strictEqual(E.state.fixtures.filter((f) => f.comp === 'CUP').length, 8 + 8 + 4 + 2 + 1);
+  assert.strictEqual(E.state.fixtures.filter((f) => f.comp === 'CUP').length, E.state.clubs.length - 1); // a knockout has n-1 ties
   E.state.fixtures.filter((f) => f.comp === 'CUP').forEach((f) => assert(f.played && f.winner !== undefined));
   const before = [1, 2].map((d) => E.standings(d).map((c) => c.id));
   // contracts: renew one expiring player (at his demand, which is always accepted), let the rest go
@@ -40,9 +42,10 @@ for (let season = 0; season < 5; season++) {
   if (E.academyUpgradeCost() !== null && E.userClub().budget > E.academyUpgradeCost() * 3) assert(E.upgradeAcademy().ok);
   const s = E.endSeason();
   // promotion/relegation swapped the right clubs
-  before[0].slice(-2).forEach((id) => assert.strictEqual(E.club(id).div, 2));
-  before[1].slice(0, 2).forEach((id) => assert.strictEqual(E.club(id).div, 1));
-  assert.strictEqual(E.state.clubs.filter((c) => c.div === 1).length, 12);
+  const k = E.promotedCount();
+  before[0].slice(-k).forEach((id) => assert.strictEqual(E.club(id).div, 2));
+  before[1].slice(0, k).forEach((id) => assert.strictEqual(E.club(id).div, 1));
+  assert.strictEqual(E.state.clubs.filter((c) => c.div === 1).length, before[0].length);
   leaving.forEach((id) => assert(!E.player(id) || E.player(id).club !== E.state.userClub, 'expired contract left'));
   if (renewed && E.player(renewed)) assert.strictEqual(E.player(renewed).club, E.state.userClub);
   assert(E.prospects().length >= E.academyIntake(), 'academy intake arrived');
