@@ -60,6 +60,18 @@ Open `index.html` in a browser, or serve the folder (for example `python3 -m htt
 - **Wonderkids:** rare players aged 21 or under with elite potential (84–96), marked 🌟. A few start at clubs across both divisions, and more come through rival youth intakes and your academy (higher academy levels find more). Every player has a personality (Professional, Determined, Balanced, Temperamental or Lazy) that speeds up or slows down development. Lazy talents can lose potential. Regular playing time makes young players develop faster, and benched wonderkids get frustrated. Rival players' potential is only a rumoured range until you pay for a scout report. Big clubs bid for your wonderkids (accept or reject on the Home screen) and buy them from smaller rivals. A Golden Boy award goes to the best player aged 21 or under each season.
 - **Training intensity:** harder training gives faster development but more injuries and slower recovery.
 
+## Android app
+
+`android/` is a small native Android project. It shows the game in a full-screen WebView, and saves are kept on the phone. The game files are copied from the repository root at build time, so there's only one copy of the game.
+
+```
+cd android
+# needs a JDK 17+ and the Android SDK (platform 34, build-tools 34); set ANDROID_HOME or android/local.properties
+./gradlew assembleDebug            # → app/build/outputs/apk/debug/app-debug.apk
+```
+
+For a release build, create `android/release.keystore` (alias `touchline`) and set `TOUCHLINE_STORE_PASSWORD` and `TOUCHLINE_KEY_PASSWORD` before running `./gradlew assembleRelease`. Keystores are git-ignored.
+
 ## Code
 
 - `data/*.js`: the real-football country packs, registered on `TM_COUNTRIES`, and the Champions League pack, `TM_CONTINENTAL`. The engine builds the game worlds from whichever packs are loaded.

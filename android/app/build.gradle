@@ -1,0 +1,52 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.touchline.manager'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.touchline.manager'
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    // Release signing: put a keystore at android/release.keystore (not committed) and set
+    // TOUCHLINE_STORE_PASSWORD / TOUCHLINE_KEY_PASSWORD, or build the debug variant instead.
+    signingConfigs {
+        release {
+            def ks = rootProject.file('release.keystore')
+            if (ks.exists()) {
+                storeFile ks
+                storePassword System.getenv('TOUCHLINE_STORE_PASSWORD') ?: ''
+                keyAlias 'touchline'
+                keyPassword System.getenv('TOUCHLINE_KEY_PASSWORD') ?: ''
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (rootProject.file('release.keystore').exists()) signingConfig signingConfigs.release
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    sourceSets {
+        main.assets.srcDirs += layout.buildDirectory.dir('webAssets')
+    }
+}
+
+// The game itself lives at the repository root; copy it into the APK's assets on every build.
+def copyWeb = tasks.register('copyWeb', Copy) {
+    from(rootProject.file('..')) {
+        include 'index.html', 'css/**', 'js/**', 'data/**'
+    }
+    into layout.buildDirectory.dir('webAssets/www')
+}
+tasks.named('preBuild') { dependsOn copyWeb }
