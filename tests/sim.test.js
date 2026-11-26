@@ -1,11 +1,12 @@
 // Headless smoke test: plays several full seasons and checks invariants.
 // Run with: node tests/sim.test.js
 const assert = require('assert');
-['england', 'spain', 'italy', 'france', 'germany', 'netherlands', 'portugal', 'europe'].forEach((f) => require(`../data/${f}.js`));
+['england', 'spain', 'italy', 'france', 'germany', 'netherlands', 'portugal', 'others', 'europe', 'nations'].forEach((f) => require(`../data/${f}.js`));
 require('../js/engine.js');
 const E = globalThis.Engine;
 
-E.newGame(+(process.argv[2]||5), 'Tester', +(process.argv[3]||12345), process.argv[4] || 'fictional');
+E.newGame(+(process.argv[2]||5), 'Tester', +(process.argv[3]||12345), process.argv[4] || 'fictional', process.argv[5] ? { nation: process.argv[5] } : {});
+const national = E.state.mode === 'national';
 const wkLog = [];
 const wkCount = () => Object.values(E.state.players).filter((p) => p.club !== null && E.isWonderkid(p)).length;
 assert(wkCount() >= 5, 'wonderkids present');
@@ -23,7 +24,7 @@ for (let season = 0; season < 5; season++) {
   }
   const table = E.standings();
   const divs = E.leagueDivs();
-  const expectedGames = divs.reduce((a, d) => { const n = E.standings(d).length; return a + n * (n - 1) * 2; }, 0);
+  const expectedGames = divs.reduce((a, d) => { const n = E.standings(d).length; return a + n * (n - 1) * (E.state.meta.leagues[d - 1].cycles || 2); }, 0);
   assert.strictEqual(E.state.clubs.reduce((a, c) => a + c.table.p, 0), expectedGames);
   E.state.cups.forEach((cup, ci) => {
     const ties = E.state.fixtures.filter((f) => f.comp === 'CUP' && f.cup === ci);
@@ -39,6 +40,14 @@ for (let season = 0; season < 5; season++) {
     assert.strictEqual(E.state.fixtures.filter((f) => f.comp === 'CL' && f.stage === 'ko').length, 8 + 8 + 4 + 2 + 1);
     assert(E.state.cl.winner !== null);
   }
+  if (E.state.intl && E.state.intl.kind) {
+    const I = E.state.intl;
+    assert.strictEqual(I.qualified.length, 24, '24 nations qualify');
+    assert(I.winner !== null, 'tournament has a winner');
+    assert.strictEqual(E.state.fixtures.filter((f) => f.comp === 'INT' && f.stage === 'TK').length, 15);
+    I.groups.forEach((g) => g.forEach((id) => assert.strictEqual(I.qTable[id].p, 6)));
+  }
+  E.state.nations.forEach((n) => n.squad.forEach((id) => assert(E.player(id) && E.player(id).nat === n.code)));
   // every club plays at most once per week
   for (let w = 0; w < E.totalWeeks(); w++) {
     const seen = new Set();
@@ -68,7 +77,7 @@ for (let season = 0; season < 5; season++) {
   if (E.state.cl && !E.state.gameOver) assert.strictEqual(E.state.cl.clubs.length, 36);
   leaving.forEach((id) => assert(!E.player(id) || E.player(id).club !== E.state.userClub, 'expired contract left'));
   if (renewed && E.player(renewed)) assert.strictEqual(E.player(renewed).club, E.state.userClub);
-  assert(E.prospects().length >= E.academyIntake(), 'academy intake arrived');
+  if (!national) assert(E.prospects().length >= E.academyIntake(), 'academy intake arrived');
   E.prospects().forEach((p) => assert(p.academy && p.age < E.ACADEMY_GRAD_AGE && !E.userClub().squad.includes(p.id)));
   Object.values(E.state.players).forEach((p) => {
     if (p.club !== null && !p.academy) assert(p.contract >= 1, `${p.name} contract ${p.contract}`);
@@ -76,6 +85,8 @@ for (let season = 0; season < 5; season++) {
   wkLog.push(`gb ${s.goldenBoy}`);
   console.log(`   academy L${E.state.academy.level}: ${E.prospects().map((p) => p.ovr + '/' + p.pot).join(' ')}; left on free: ${s.departed.length}; squad ${E.userClub().squad.length}`);
   if (E.state.gameOver) { E.state.gameOver = false; E.startNextSeason(); } // the test bot ignores sackings
+  if (s.intl) console.log(`   ${s.intl.name}: ${s.intl.winner} beat ${s.intl.runnerUp}${s.intl.mine ? ' | you: ' + s.intl.mine + ' — ' + s.verdict : ''}`);
+  else if (national) console.log('   ' + s.verdict);
   console.log(`S${s.season}: ${s.champions.map((c) => c.league + ' ' + c.club).join(', ')}; CL ${clWinner}; cup ${s.cupWinner}; user D${s.division} ${s.position} (exp ${s.expected}) cup ${s.cup} CL ${s.cl}, budget ${E.money(E.userClub().budget)}, top ${s.topScorer}`);
   E.state.clubs.forEach((c) => {
     assert(c.squad.length >= 16, `${c.name} squad ${c.squad.length}`);

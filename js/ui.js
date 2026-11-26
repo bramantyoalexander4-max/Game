@@ -12,7 +12,7 @@
     squadSort: 'pos', squadView: 'team', neg: null,
     tacticSel: null, // index into lineup, or 'b:<pid>' for a bench player
     marketPos: 'ALL', marketMax: 0, marketQuery: '',
-    leagueView: 'table', resultsWeek: null, leagueDiv: null, dataset: null, mname: 'Manager', startCountry: null, marketLeague: 'ALL',
+    leagueView: 'table', resultsWeek: null, leagueDiv: null, dataset: null, mname: 'Manager', startCountry: null, marketLeague: 'ALL', startMode: 'club', poolPos: 'ALL', poolQuery: '',
     match: null, matchTimer: null, matchSpeed: 1, matchSel: null, matchPaused: false,
   };
 
@@ -101,6 +101,12 @@
       return rank <= Math.ceil(n / 3) ? 'Promotion hopeful' : 'Long-term project';
     };
     const shownLeagues = ds.leagues.filter((l) => l.country === ui.startCountry);
+    const nationsOk = !!ds.nations;
+    if (!nationsOk) ui.startMode = 'club';
+    const modeChips = nationsOk ? `<h2>What do you want to manage?</h2><div class="btns" style="margin-bottom:6px">
+        <button class="btn ${ui.startMode === 'club' ? 'on' : ''}" data-a="start-mode" data-m="club">🏟️ A club</button>
+        <button class="btn ${ui.startMode === 'national' ? 'on' : ''}" data-a="start-mode" data-m="national">🌍 A national team</button></div>` : '';
+    const nationList = nationsOk && ui.startMode === 'national' ? E.previewNations(ds.id) : [];
     app.innerHTML = `<div class="start">
       <div class="logo"><h1>⚽ Touchline <span>Manager</span></h1><p class="muted">Pick a club and lead them to glory.</p></div>
       <div class="card"><label class="muted small">Manager name</label><br>
@@ -108,8 +114,14 @@
       <h2>Game world</h2>
       <div class="btns" style="margin-bottom:6px">${sets.map((d) => `<button class="btn ${d.id === ds.id ? 'on' : ''}" data-a="dataset" data-id="${esc(d.id)}">${esc(d.short || d.name)}</button>`).join('')}</div>
       <p class="small muted">${esc(ds.note || '')}</p>
-      ${countries.length > 1 ? `<div class="chips">${countries.map((c) => `<button class="btn ${c === ui.startCountry ? 'on' : ''}" data-a="start-country" data-c="${esc(c)}">${esc(c)}</button>`).join('')}</div>` : ''}
-      ${shownLeagues.map((lg) => `<h2>${esc(lg.name)}</h2><div class="list">${clubs.map((c, i) => (c.league !== lg.key ? '' : `
+      ${modeChips}
+      ${ui.startMode === 'national' ? `<p class="small muted">Pick your squad from every player of that nationality in the world, play qualifiers in the international breaks and lead your country at the World Cup and the Euros. The club seasons play out around you.</p>
+        <div class="list">${nationList.map((n, i) => `<div class="item tap" data-a="pick-nation" data-code="${esc(n.code)}">
+          <div class="crest" style="background:${esc(n.color)}">${esc(n.code)}</div>
+          <div class="grow"><div class="name">${esc(n.name)}</div><div class="stars">${stars(n.rep)}</div></div>
+          <div class="muted small">${i < 8 ? 'Contender' : i < 20 ? 'Dark horse' : 'Underdog'} · ${esc(n.conf)}</div></div>`).join('')}</div></div>` : ''}
+      ${ui.startMode === 'national' ? '' : countries.length > 1 ? `<div class="chips">${countries.map((c) => `<button class="btn ${c === ui.startCountry ? 'on' : ''}" data-a="start-country" data-c="${esc(c)}">${esc(c)}</button>`).join('')}</div>` : ''}
+      ${ui.startMode === 'national' ? '' : shownLeagues.map((lg) => `<h2>${esc(lg.name)}</h2><div class="list">${clubs.map((c, i) => (c.league !== lg.key ? '' : `
         <div class="item tap" data-a="pick-club" data-i="${i}">
           <div class="crest" style="background:${esc(c.color)}">${esc(c.short)}</div>
           <div class="grow"><div class="name">${esc(c.name)}</div><div class="stars">${stars(c.rep)}</div></div>
@@ -122,8 +134,12 @@
   const TABS = [['home', '🏠', 'Home'], ['squad', '👥', 'Squad'], ['tactics', '📋', 'Tactics'],
     ['league', '🏆', 'League'], ['transfers', '💱', 'Transfers'], ['club', '🏟️', 'Club']];
 
+  const NTABS = [['home', '🏠', 'Home'], ['squad', '👥', 'Squad'], ['tactics', '📋', 'Tactics'],
+    ['intl', '🌍', 'Internat.'], ['pool', '🔎', 'Players'], ['fed', '🏛️', 'Federation']];
+  const isNational = () => G() && G().mode === 'national';
   function render() {
     if (!G()) return renderStart();
+    if (isNational()) return renderNational();
     const c = E.userClub();
     document.documentElement.style.setProperty('--club', c.color);
     const body = { home: viewHome, squad: viewSquad, tactics: viewTactics, league: viewLeague, transfers: viewTransfers, club: viewClub }[ui.tab]();
@@ -139,6 +155,171 @@
       const on = row.querySelector('.btn.on');
       if (on) row.scrollLeft = on.offsetLeft - row.offsetLeft - (row.clientWidth - on.offsetWidth) / 2;
     });
+  }
+
+  // ---------- national team career ----------
+  function renderNational() {
+    const n = E.userClub();
+    document.documentElement.style.setProperty('--club', n.color);
+    if (!['home', 'squad', 'tactics', 'intl', 'pool', 'fed'].includes(ui.tab)) ui.tab = 'home';
+    const body = { home: viewNationalHome, squad: viewNationalSquad, tactics: viewTactics, intl: viewInternational, pool: viewPool, fed: viewFederation }[ui.tab]();
+    const rank = E.nationRanking().findIndex((x) => x.id === n.id) + 1;
+    app.innerHTML = `
+      <div class="top">${crest(n)}
+        <div class="title"><b>${esc(n.name)}</b><small>${E.seasonName()} · Week ${Math.min(G().week + 1, E.totalWeeks())}/${E.totalWeeks()} · Ranked ${E.ordinal(rank)}</small></div>
+        <div class="money">${n.rep}<small>strength</small></div>
+      </div>
+      <main>${body}</main>
+      <nav class="tabs"><div class="inner">${NTABS.map(([k, i, l]) => `<button data-a="tab" data-t="${k}" class="${ui.tab === k ? 'on' : ''}"><span>${i}</span>${l}</button>`).join('')}</div></nav>`;
+    app.querySelectorAll('.chips').forEach((row) => {
+      const on = row.querySelector('.btn.on');
+      if (on) row.scrollLeft = on.offsetLeft - row.offsetLeft - (row.clientWidth - on.offsetWidth) / 2;
+    });
+  }
+  function nextUserMatchWeek() {
+    const g = G();
+    for (let w = g.week; w < E.totalWeeks(); w++) if (E.userFixture(w)) return w;
+    return null;
+  }
+  function viewNationalHome() {
+    const g = G(), n = E.userClub();
+    let top = '';
+    if (g.gameOver) {
+      top = `<div class="card"><h2>📰 You've been sacked</h2><p>${esc(g.gameOverReason || '')}</p>
+        <button class="btn primary block" data-a="new-career">Start a new career</button></div>`;
+    } else if (g.seasonOver) {
+      top = `<div class="card"><h2>🏁 ${E.seasonName()} complete</h2><p>${esc(g.intl && g.intl.kind ? `${E.intlName()}: ${E.STAGE_TEXT[E.intlStage(n.id)]}.` : 'A season of friendlies is over.')}</p>
+        <button class="btn primary block" data-a="end-season">See season review</button></div>`;
+    } else if (E.userFixture()) {
+      const fx = E.userFixture();
+      const h = E.club(fx.home), a = E.club(fx.away);
+      const rank = (x) => E.ordinal(E.nationRanking().findIndex((y) => y.id === x.id) + 1);
+      top = `<div class="card">
+        <div class="row between small muted"><span>🌍 ${esc(E.weekLabel(g.week))}</span><span>${fx.home === n.id ? 'Home' : 'Away'}</span></div>
+        <div class="fixture" style="margin:12px 0">
+          <div class="side">${crest(h)}<b>${esc(h.name)}</b><span class="strength">Str ${h.rep} · ranked ${rank(h)}</span></div>
+          <div class="vs">vs</div>
+          <div class="side">${crest(a)}<b>${esc(a.name)}</b><span class="strength">Str ${a.rep} · ranked ${rank(a)}</span></div>
+        </div>
+        ${fx.ko ? '<p class="small" style="text-align:center;color:var(--accent2)">Knockout: a draw goes to penalties.</p>' : ''}
+        <p class="small muted" style="text-align:center">${n.formation} · ${n.mentality} · ${n.squad.length}/${E.INTL_SQUAD} in the squad</p>
+        <div class="btns"><button class="btn primary" data-a="play-live">▶ Play match</button><button class="btn" data-a="play-quick">⏩ Quick sim</button></div>
+      </div>`;
+    } else {
+      const nw = nextUserMatchWeek();
+      top = `<div class="card"><div class="small muted">${esc(E.weekLabel(g.week))}</div>
+        <h2>No international match this week</h2>
+        <p class="muted">${nw === null ? 'Nothing left for you this season.' : `Next match: ${esc(E.weekLabel(nw))} in ${nw - g.week} week(s).`} The club season carries on: keep an eye on your players' form.</p>
+        <div class="btns"><button class="btn primary" data-a="skip-to-next">⏩ ${nw === null ? 'Skip to the end of the season' : 'Skip to the next match'}</button>
+          <button class="btn" data-a="skip-week">One week</button></div></div>`;
+    }
+    const injured = E.squadOf(n.id).filter((p) => p.injury);
+    const news = g.news.slice(0, 15).map((x) => `<div class="news"><small>S${x.season} W${x.week + 1}</small>${esc(x.text)}</div>`).join('');
+    return top + (injured.length && !g.gameOver ? `<div class="card small">🚑 Injured in your squad: ${injured.map((p) => esc(p.name)).join(', ')}</div>` : '')
+      + `<div class="card small">${esc(E.intlOutlook())}</div>`
+      + `<h2>Inbox</h2><div class="list">${news || '<div class="news muted">No news yet.</div>'}</div>`;
+  }
+  function natRow(p, action) {
+    const c = p.club !== null ? E.club(p.club) : null;
+    return `<div class="item tap" data-a="${action}" data-id="${p.id}">${posTag(p.pos)}<div class="ovr">${p.ovr}</div>
+      <div class="grow"><div class="name">${esc(p.name)}${wk(p)}</div>
+        <div class="small muted">${p.age}y · ${c ? esc(c.name) : 'Free agent'} · ${p.caps || 0} caps${p.intlGoals ? ` · ${p.intlGoals} goals` : ''}</div></div>
+      ${p.injury ? `<span class="tag inj">INJ ${p.injury}w</span>` : E.userClub().lineup.some((l) => l.pid === p.id) ? '<span class="tag xi">XI</span>' : ''}
+      ${bar(p.fitness)}</div>`;
+  }
+  function viewNationalSquad() {
+    const n = E.userClub();
+    const sq = E.squadOf(n.id).sort((a, b) => E.POS_ORDER[a.pos] - E.POS_ORDER[b.pos] || b.ovr - a.ovr);
+    const counts = ['GK', 'DF', 'MF', 'FW'].map((pos) => `${pos} ${sq.filter((p) => p.pos === pos).length}`).join(' · ');
+    return `<div class="row between"><h2>Squad (${sq.length}/${E.INTL_SQUAD})</h2><button class="btn" data-a="auto-squad">Auto-pick squad</button></div>
+      <p class="small muted" style="margin:0 4px 8px">${counts}. Call up players from the Players tab; tap a player to drop him.</p>
+      <div class="list">${sq.map((p) => natRow(p, 'nat-player')).join('') || '<div class="news muted">No players called up.</div>'}</div>`;
+  }
+  function viewPool() {
+    const n = E.userClub();
+    const q = ui.poolQuery.toLowerCase();
+    const pool = E.eligible(n.code).filter((p) => !n.squad.includes(p.id) && (ui.poolPos === 'ALL' || p.pos === ui.poolPos)
+      && (!q || p.name.toLowerCase().includes(q))).sort((a, b) => b.ovr - a.ovr).slice(0, 80);
+    return `<h2>Eligible players</h2>
+      <div class="chips">${['ALL', 'GK', 'DF', 'MF', 'FW'].map((x) => `<button class="btn ${ui.poolPos === x ? 'on' : ''}" data-a="pool-pos" data-p="${x}">${x}</button>`).join('')}</div>
+      <input id="pq" placeholder="Search name…" value="${esc(ui.poolQuery)}" style="width:100%;margin-bottom:10px">
+      <p class="small muted">Every ${esc(n.name)} player in the world who isn't in your squad, best first.</p>
+      <div class="list">${pool.map((p) => natRow(p, 'nat-player')).join('') || '<div class="news muted">No players match.</div>'}</div>`;
+  }
+  function natPlayerModal(pid) {
+    const p = E.player(pid), n = E.userClub();
+    if (!p) return;
+    const inSquad = n.squad.includes(p.id);
+    const c = p.club !== null ? E.club(p.club) : null;
+    openModal(`<div class="row">${posTag(p.pos)}<div class="ovr" style="font-size:26px;width:auto">${p.ovr}</div>
+        <div class="grow"><b style="font-size:18px">${esc(p.name)}${wk(p)}</b><div class="small muted">${c ? esc(c.name) : 'Free agent'}</div></div></div>
+      <div class="kv">
+        <span>Age</span><span>${p.age}</span><span>Potential</span><span>${potText(p)}</span>
+        <span>Caps</span><span>${p.caps || 0} (${p.intlGoals || 0} goals)</span>
+        <span>Club season</span><span>${p.apps} apps · ${p.goals} goals · ${p.assists} assists</span>
+        <span>Fitness</span><span>${Math.round(p.fitness)}%</span>
+        <span>Status</span><span>${p.injury ? `Injured (${p.injury} wk)` : 'Available'}</span>
+      </div>
+      ${inSquad ? `<button class="btn danger block" data-a="nat-drop" data-id="${p.id}">Drop from the squad</button>`
+        : `<button class="btn primary block" data-a="nat-call" data-id="${p.id}">📞 Call up</button>`}
+      <button class="btn block" style="margin-top:8px" data-a="close">Close</button>`);
+  }
+  function viewFederation() {
+    const g = G(), n = E.userClub();
+    const hist = g.history.filter((h) => h.national);
+    return `<h2>Federation</h2><div class="card"><div class="kv" style="margin:0">
+        <span>Next tournament</span><span>${g.intl && g.intl.kind ? esc(E.intlName()) : 'None next summer'}</span>
+        <span>Target</span><span>${g.intl && g.intl.kind ? esc(E.EXPECT_TEXT[E.intlExpectation()]) : '-'}</span>
+        <span>Warnings</span><span>${g.intl && g.intl.strikes ? '⚠️ One more failure and you are out' : 'None'}</span>
+      </div><p class="small muted" style="margin:8px 0 0">Missing the target by one stage earns a warning; a second miss, or missing by two stages, gets you sacked.</p></div>
+      <h2>Your record</h2>
+      <div class="list">${hist.length ? hist.map((h) => `<div class="item"><div class="grow">${E.seasonName(h.season)}</div><b>${esc(h.result)}</b></div>`).join('') : '<div class="news muted">Your first season is under way.</div>'}</div>
+      <h2>Game</h2>
+      <div class="btns"><button class="btn" data-a="save">💾 Save</button><button class="btn danger" data-a="new-career">New career</button></div>`;
+  }
+  function natTable(ids, table) {
+    const g = G();
+    return `<div class="list"><table><tr><th>#</th><th class="l">Team</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th></tr>
+      ${E.groupStandings(ids, table).map((id, i) => { const c = E.club(id), t = table[id]; return `<tr class="${id === g.userClub ? 'me' : ''}">
+        <td>${i + 1}</td><td class="l"><span class="dot" style="background:${c.color}"></span>${esc(c.name)}</td>
+        <td>${t.p}</td><td>${t.w}</td><td>${t.d}</td><td>${t.l}</td><td>${t.gf - t.ga > 0 ? '+' : ''}${t.gf - t.ga}</td><td><b>${t.pts}</b></td></tr>`; }).join('')}
+      </table></div>`;
+  }
+  function viewInternational() {
+    const g = G(), I = g.intl;
+    if (!I) return '<div class="news muted">No international football in this world.</div>';
+    const me = g.userClub;
+    let html = `<div class="card"><b>${esc(I.kind ? E.intlName() : 'International friendlies')}</b><p class="small muted" style="margin:6px 0 0">${I.kind
+      ? `${I.kind === 'Euro' ? 'European' : 'All'} national teams play six qualifiers in groups of four during the international breaks. The best 24 (group winners first, then runners-up and so on) go to the tournament next summer: six groups of four, then a round of 16.`
+      : 'No tournament next summer: national teams play friendlies against sides of similar strength.'}</p></div>`;
+    const tk = g.fixtures.filter((f) => f.comp === 'INT' && f.stage === 'TK');
+    if (I.qualified && I.tGroups.length) {
+      html += `<h2>${esc(E.intlName())} groups</h2>` + I.tGroups.map((grp, i) => `<b class="small muted">Group ${'ABCDEF'[i]}</b>${natTable(grp, I.tTable)}`).join('');
+      E.T_KO.forEach((name, j) => {
+        const fx = tk.filter((f) => f.round === j);
+        if (fx.length) html += `<h2>${name}</h2><div class="list">${fx.map(fxRow).join('')}</div>`;
+      });
+    } else if (I.kind) {
+      const mine = I.groups.findIndex((grp) => grp.includes(me));
+      const order = mine >= 0 ? [mine, ...I.groups.map((_, i) => i).filter((i) => i !== mine)] : I.groups.map((_, i) => i);
+      html += `<h2>Qualifying groups</h2>` + order.map((i) => `<b class="small muted">Group ${i + 1}${i === mine ? ' (yours)' : ''}</b>${natTable(I.groups[i], I.qTable)}`).join('');
+    } else if (isNational()) {
+      const fr = g.fixtures.filter((f) => f.comp === 'INT' && (f.home === me || f.away === me));
+      html += `<h2>Your friendlies</h2><div class="list">${fr.map(fxRow).join('')}</div>`;
+    }
+    html += `<h2>World ranking</h2><div class="list">${E.nationRanking().slice(0, 20).map((n, i) => `<div class="item small ${n.id === me ? 'sel' : ''}">
+      <b style="width:24px">${i + 1}</b><span class="dot" style="background:${n.color}"></span><div class="grow">${esc(n.name)}</div><b>${n.rep}</b></div>`).join('')}</div>`;
+    if (I.history.length) html += `<h2>Past tournaments</h2><div class="list">${I.history.map((h) => `<div class="item small"><div class="grow">${esc(h.kind)} ${h.year}</div><b>🏆 ${esc(h.winner)}</b><span class="muted">beat ${esc(h.runnerUp)}</span></div>`).join('')}</div>`;
+    return html;
+  }
+  function skipToNext() {
+    // simulate club weeks until the user has a match (or the season ends)
+    let guard = 0;
+    do {
+      E.playOtherMatches(null);
+      E.endWeek();
+    } while (!G().seasonOver && !E.userFixture() && ++guard < 80);
+    save(); ui.tab = 'home'; render(); window.scrollTo(0, 0);
   }
 
   // ---------- home ----------
@@ -157,7 +338,11 @@
     } else if (!E.userFixture()) {
       const slot = g.calendar[g.week];
       let cupNote;
-      if (slot.type === 'league') cupNote = `There's no ${esc(E.divName(E.userClub().div))} game this week.`;
+      if (!slot) {
+        top = `<div class="card"><div class="small muted">${esc(E.weekLabel(g.week))}</div><h2>🌍 The ${esc(E.intlName())} is on</h2>
+          <p class="muted">The club season is over. Follow the tournament in League → International.</p>
+          <div class="btns"><button class="btn primary" data-a="skip-to-next">⏩ Simulate the tournament</button><button class="btn" data-a="skip-week">One day</button></div></div>`;
+      } else if (slot.type === 'league') cupNote = `There's no ${esc(E.divName(E.userClub().div))} game this week.`;
       else if (slot.type === 'cl') {
         const r = E.clResult(g.userClub);
         cupNote = r === null ? `It's a ${esc(E.clName())} week and you're not in it this season.` : `It's a ${esc(E.clName())} week. You're out: ${esc(r.toLowerCase())}.`;
@@ -167,7 +352,7 @@
         cupNote = round < 0 ? `It's a cup week, but the ${esc(E.cupName())} has no round this week.`
           : cup.alive.includes(g.userClub) ? 'You have a bye this round.' : `You're out of the ${esc(E.cupName())}.`;
       }
-      top = `<div class="card"><div class="small muted">${esc(E.weekLabel(g.week))}</div>
+      if (slot) top = `<div class="card"><div class="small muted">${esc(E.weekLabel(g.week))}</div>
         <h2>No match this week</h2><p class="muted">${cupNote} The squad gets a week to rest.</p>
         <button class="btn primary block" data-a="skip-week">⏩ Continue</button></div>`;
     } else {
@@ -356,6 +541,7 @@
         ${!mine && p.club !== null ? `<span>Asking price</span><span>${M(E.askingPrice(p))}</span>` : ''}
         <span>Wage</span><span>${M(p.wage)}/wk</span>
         <span>Contract</span><span style="${p.club !== null && p.contract <= 1 ? 'color:var(--warn)' : ''}">${contractText(p)}</span>
+        ${p.nat && G().intl ? `<span>Nationality</span><span>${esc((E.nationMeta()[p.nat] || { name: p.nat }).name)} · ${p.caps || 0} caps</span>` : ''}
         <span>Fitness</span><span>${Math.round(p.fitness)}%</span>
         <span>Morale</span><span>${p.morale > 75 ? '😀' : p.morale > 50 ? '🙂' : p.morale > 30 ? '😐' : '😠'} ${p.morale}</span>
         <span>Status</span><span>${p.injury ? `Injured (${p.injury} wk)` : 'Available'}</span>
@@ -442,7 +628,8 @@
   function viewLeague() {
     const g = G();
     const div = ui.leagueDiv || E.userClub().div;
-    const views = [['table', 'Table'], ['fixtures', 'Fixtures'], ['cup', 'Cup'], ...(E.clName() ? [['europe', 'Europe']] : []), ['stats', 'Scorers']];
+    const views = [['table', 'Table'], ['fixtures', 'Fixtures'], ['cup', 'Cup'], ...(E.clName() ? [['europe', 'Europe']] : []),
+      ...(g.intl ? [['intl', 'International']] : []), ['stats', 'Scorers']];
     const toggle = `<div class="chips" style="margin-bottom:4px">${views.map(([k, l]) =>
       `<button class="btn ${ui.leagueView === k ? 'on' : ''}" data-a="league-view" data-v="${k}">${l}</button>`).join('')}</div>`;
     const divChips = `<div class="chips">${E.leagueDivs().map((d) => `<button class="btn ${div === d ? 'on' : ''}" data-a="league-div" data-d="${d}">${esc(E.divName(d))}</button>`).join('')}</div>`;
@@ -458,6 +645,7 @@
     }
     if (ui.leagueView === 'cup') return toggle + divChips + viewCup(div);
     if (ui.leagueView === 'europe') return toggle + viewEurope();
+    if (ui.leagueView === 'intl') return toggle + viewInternational();
     if (ui.leagueView === 'stats') {
       const ps = Object.values(g.players).filter((p) => p.club !== null && E.club(p.club).div === div && (p.goals || p.assists))
         .sort((a, b) => b.goals - a.goals || b.assists - a.assists).slice(0, 25);
@@ -707,10 +895,24 @@
   function seasonReview() {
     const s = E.endSeason();
     save();
+    const intlLine = s.intl ? `<span>${esc(s.intl.name)}</span><span>🌍 ${esc(s.intl.winner)}</span>` : '';
+    if (s.national) {
+      openModal(`<h2 style="margin-top:0">${E.seasonName(s.season)} review</h2>
+        <div class="kv">${intlLine}
+          ${s.intl ? `<span>Your tournament</span><span>${esc(s.intl.mine)}</span><span>Federation target</span><span>${esc(s.expectedText || '-')}</span>` : ''}
+          ${s.clName && s.clWinner ? `<span>${esc(s.clName)}</span><span>⭐ ${esc(s.clWinner)}</span>` : ''}
+          ${s.champions.slice(0, 8).map((c) => `<span>${esc(c.league)}</span><span>🏆 ${esc(c.club)}</span>`).join('')}
+        </div>
+        ${s.goldenBoy ? `<div class="wkcard">🏅 <b>Golden Boy:</b> ${esc(s.goldenBoy)}</div>` : ''}
+        <p><b>${esc(s.verdict)}</b></p>
+        <button class="btn primary block" data-a="close-render">${G().gameOver ? 'OK' : 'Start next season'}</button>`);
+      return;
+    }
     openModal(`<h2 style="margin-top:0">${E.seasonName(s.season)} review</h2>
       <div class="kv">
         ${s.champions.map((c) => `<span>${esc(c.league)} champions</span><span>🏆 ${esc(c.club)}</span>`).join('')}
         ${s.clName && s.clWinner ? `<span>${esc(s.clName)}</span><span>⭐ ${esc(s.clWinner)}</span>` : ''}
+        ${intlLine}
         <span>${esc(s.cupName)}</span><span>🏆 ${esc(s.cupWinner)}</span>
         <span>Your finish</span><span>${E.ordinal(s.position)} in the ${esc(E.divName(s.division))} (${s.points} pts)</span>
         <span>Your cup run</span><span>${esc(s.cup)}</span>
@@ -730,7 +932,7 @@
       ${s.departed.length ? `<p class="small"><b>Contracts expired (left on a free):</b> ${s.departed.map(esc).join(', ')}</p>` : ''}
       ${s.graduatesLeft.length ? `<p class="small"><b>Left the academy:</b> ${s.graduatesLeft.map(esc).join(', ')}</p>` : ''}
       ${s.youth.length ? `<p class="small"><b>Academy intake:</b> ${s.youth.map(esc).join(', ')}</p>` : ''}
-      ${G().userClub !== null && E.userClub().squad.length < 18 ? `<p class="small" style="color:var(--warn)">Your squad is down to ${E.userClub().squad.length}. Check the transfer market and the academy.</p>` : ''}
+      ${E.userClub().squad.length < 18 ? `<p class="small" style="color:var(--warn)">Your squad is down to ${E.userClub().squad.length}. Check the transfer market and the academy.</p>` : ''}
       <button class="btn primary block" data-a="close-render">${G().gameOver ? 'OK' : 'Start next season'}</button>`);
   }
 
@@ -754,6 +956,13 @@
       case 'start-country': ui.startCountry = d.c; renderStart(true); break;
       case 'ask-yes': { const c = pendingConfirm; pendingConfirm = null; closeModal(); if (c && c.onYes) c.onYes(); break; }
       case 'ask-no': { const c = pendingConfirm; pendingConfirm = null; closeModal(); if (c && c.onNo) c.onNo(); break; }
+      case 'start-mode': ui.startMode = d.m; renderStart(true); break;
+      case 'pick-nation': {
+        const name = (document.getElementById('mname').value || 'Manager').trim().slice(0, 24) || 'Manager';
+        toast('Building the world…');
+        setTimeout(() => { E.newGame(0, name, undefined, ui.dataset, { nation: d.code }); ui.tab = 'home'; save(); render(); }, 30);
+        break;
+      }
       case 'pick-club': {
         const name = (document.getElementById('mname').value || 'Manager').trim().slice(0, 24) || 'Manager';
         E.newGame(+d.i, name, undefined, ui.dataset);
@@ -813,6 +1022,12 @@
       case 'league-view': ui.leagueView = d.v; render(); break;
       case 'league-div': ui.leagueDiv = +d.d; render(); break;
       case 'skip-week': skipWeek(); break;
+      case 'skip-to-next': toast('Simulating…'); setTimeout(skipToNext, 30); break;
+      case 'nat-player': natPlayerModal(+d.id); break;
+      case 'nat-call': { const r = E.callUpPlayer(+d.id); closeModal(); if (r.ok) { save(); toast('Called up 📞'); } else toast(r.why); render(); break; }
+      case 'nat-drop': E.dropPlayer(+d.id); closeModal(); save(); render(); break;
+      case 'auto-squad': E.autoSquad(); save(); render(); toast('Squad picked.'); break;
+      case 'pool-pos': ui.poolPos = d.p; render(); break;
       case 'week': {
         const cur = ui.resultsWeek === null ? Math.min(G().week, E.totalWeeks() - 1) : ui.resultsWeek;
         ui.resultsWeek = Math.max(0, Math.min(E.totalWeeks() - 1, cur + +d.d)); render(); break;
@@ -873,6 +1088,13 @@
   });
   document.addEventListener('input', (e) => {
     if (e.target.id === 'mname') ui.mname = e.target.value;
+    if (e.target.id === 'pq') {
+      ui.poolQuery = e.target.value;
+      const pos = e.target.selectionStart;
+      render();
+      const el = document.getElementById('pq');
+      el.focus(); el.setSelectionRange(pos, pos);
+    }
     if (e.target.id === 'mq') {
       ui.marketQuery = e.target.value;
       const pos = e.target.selectionStart;

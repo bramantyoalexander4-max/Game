@@ -4,14 +4,23 @@ A football management game that runs in the browser. It has no dependencies and 
 
 Take charge of a club and manage the squad, tactics, transfers and finances across as many seasons as the board allows. There are two game worlds:
 
-- **Europe 2025/26:** 166 real clubs and about 2,700 real players as of the start of the 2025/26 season. It covers the Premier League and Championship (3 up, 3 down), La Liga, Serie A, Ligue 1, the Bundesliga, the Eredivisie and the Primeira Liga, all running at the same time. Each country has its own cup (FA Cup, Copa del Rey, Coppa Italia, Coupe de France, DFB-Pokal, KNVB Cup, Taça de Portugal).
-  - **Champions League:** the real 36-club 2025/26 field, including 10 clubs from outside these leagues, such as Galatasaray, Club Brugge and Olympiacos, which play only in Europe. It has an 8-game league phase, then a knockout play-off, round of 16, quarter-finals, semi-finals and final. Knockout ties are single matches, a simplification.
-  - **Qualification:** from the second season, the top 5 in England and Spain and the top 4 in Italy, Germany and France and the top 2 in the Netherlands and Portugal qualify, along with the same 10 other clubs.
-  - **Simplifications:** only England has a second tier, so the other leagues have no relegation. A season is 65 weeks.
+- **Europe 2025/26:** 286 real clubs in 17 leagues across 16 countries, all running at the same time:
+  - England (Premier League and Championship, 3 up, 3 down), Spain, Italy, France, Germany, the Netherlands and Portugal, with about 2,800 real players as of the start of the 2025/26 season.
+  - Turkey, Belgium, Greece, Czechia, Denmark, Norway, Azerbaijan, Cyprus and Kazakhstan, with real club lists. Only the big clubs' best-known players are real; the rest of each squad is generated.
+  - Each country has its own cup.
+  - You can manage **any club or any national team**.
+  - **Champions League:** the real 36-club 2025/26 field, as at the start of 2025/26. It has an 8-game league phase, then a knockout play-off, round of 16, quarter-finals, semi-finals and final. Knockout ties are single matches, a simplification.
+  - **Qualification:** from the second season, the top 5 in England and Spain and the top 4 in Italy, Germany and France, the top 2 in the Netherlands, Portugal, Turkey and Belgium, and the champions of Greece, Czechia, Denmark, Norway, Azerbaijan and Cyprus qualify.
+  - **Simplifications:** only England has a second tier, so the other leagues have no relegation. Smaller leagues play each other 3 or 4 times. A season is 65 weeks, plus 7 tournament weeks in tournament summers. Nationalities are best-known and may contain mistakes; generated players get random nationalities, mostly local.
+- **National teams (Europe world):** every player has a nationality, and 52 nations can field a team (37 are selectable at the start).
+  - Pick "A national team" on the start screen to manage a country: call up 23 players, set tactics and play 6 matches during the international breaks.
+  - Each summer there's a tournament: the World Cup in 2026 and 2030, the Euros in 2028. Qualifying groups of 4 lead to a 24-team finals with 6 groups, then a round of 16. There are no tournaments in odd years, so those seasons are friendlies.
+  - The federation sets a target from your world ranking. Missing it by one stage earns a warning; a second miss, or missing by two stages, gets you sacked.
+  - In club careers the internationals run in the background, and you can follow them in League → International.
 - **England only:** just the Premier League and Championship.
 - **Fictional:** 24 invented clubs in two divisions of 12, with randomly generated players.
 
-> The real-football data in `data/` (`england.js`, `spain.js`, `italy.js`, `france.js`, `germany.js`, `netherlands.js`, `portugal.js`, `europe.js`) is an unofficial, best-effort snapshot. Squads may be out of date (transfers after summer 2025 aren't included), ages are approximate, and the ratings are editorial estimates rather than official figures. Partially known squads, mostly smaller clubs, are topped up with generated players. No club crests or logos are used, only names and kit colours. Edit the file to update squads or ratings: each player is `"Name|POS|age|rating|potential"`.
+> The real-football data in `data/` (`england.js`, `spain.js`, `italy.js`, `france.js`, `germany.js`, `netherlands.js`, `portugal.js`, `others.js`, `europe.js`, `nations.js`) is an unofficial, best-effort snapshot. Squads may be out of date (transfers after summer 2025 aren't included), ages are approximate, and the ratings are editorial estimates rather than official figures. Partially known squads, mostly smaller clubs, are topped up with generated players. No club crests or logos are used, only names and kit colours. Edit the file to update squads or ratings: each player is `"Name|POS|age|rating|potential"`.
 
 ## Play
 
@@ -37,4 +46,4 @@ Open `index.html` in a browser, or serve the folder (for example `python3 -m htt
 - `data/*.js`: the real-football country packs, registered on `TM_COUNTRIES`, and the Champions League pack, `TM_CONTINENTAL`. The engine builds the game worlds from whichever packs are loaded.
 - `js/engine.js`: the game rules and simulation. It doesn't touch the DOM and runs under Node.
 - `js/ui.js`: rendering and input.
-- `tests/sim.test.js`: a headless smoke test that plays 5 full seasons and checks the table, the cup and promotion/relegation. Run it with `node tests/sim.test.js [clubIndex] [seed] [fictional|england|europe]`.
+- `tests/sim.test.js`: a headless smoke test that plays 5 full seasons and checks the table, the cup and promotion/relegation. Run it with `node tests/sim.test.js [clubIndex] [seed] [fictional|england|europe] [NATION_CODE]`. Pass a nation code such as ESP to test national-team mode.
