@@ -27,8 +27,9 @@ Take charge of a club and manage the squad, tactics, transfers and finances acro
   - They're played in the same weeks as the Champions League, so the season doesn't get longer.
 - **Indonesia:** an 18-club Super League. The national team uses its naturalised internationals (Idzes, Audero, Paes, Verdonk, Diks, Hilgers, Romeny, Haye and others).
 - **👑 Legends market (Transfers → Legends):** 45 all-time greats at their peak (age 27), such as Pelé, Maradona, Ronaldinho, Beckham, Zidane, Ronaldo Nazário, Cruyff and Maldini.
-  - Each legend can be signed once per career, and only by you, for a big fee.
-  - Legends age normally from then on, and they're eligible for their national teams.
+  - Each legend can be signed once per career, and only by you.
+  - Legends cost **Legend Points**, not money. You earn points by winning: +3 a win, +1 a draw, +60 a league title, +40 promotion, +30 a domestic cup, +80 the Champions League, +60 a Libertadores or AFC title, +15 Champions League qualification, +25 for beating the board's target, and +15 when your player wins the Golden Boy. Prices run from 40 points (Bambang Pamungkas) to 296 (Pelé, Maradona).
+  - Legends age normally, but they have retired from international football and are never called up.
   - The ratings are playful estimates of each player at his best.
 - **Nations League:** in years without a World Cup or Euro, European national teams play the Nations League instead of friendlies.
   - Leagues A, B and C have groups of 4 over the 6 international breaks.

@@ -146,7 +146,7 @@
     app.innerHTML = `
       <div class="top">${crest(c)}
         <div class="title"><b>${esc(c.name)}</b><small>${E.seasonName()} · Week ${Math.min(G().week + 1, E.totalWeeks())}/${E.totalWeeks()} · ${esc(E.divName(c.div))} · ${E.ordinal(E.position(c.id))}</small></div>
-        <div class="money">${M(c.budget)}<small>budget</small></div>
+        <div class="money">${M(c.budget)}<small>budget · ⭐ ${E.legendPoints()}</small></div>
       </div>
       <main>${body}</main>
       <nav class="tabs"><div class="inner">${TABS.map(([k, i, l]) => `<button data-a="tab" data-t="${k}" class="${ui.tab === k ? 'on' : ''}"><span>${i}</span>${l}</button>`).join('')}</div></nav>`;
@@ -546,7 +546,7 @@
     }
     openModal(`<div class="row">${posTag(p.pos)}<div class="ovr" style="font-size:26px;width:auto">${p.ovr}</div>
         <div class="grow"><b style="font-size:18px">${p.legend ? '👑 ' : ''}${esc(p.name)}${wk(p)}</b><div class="small muted">${c ? esc(c.name) : 'Free agent'}</div></div></div>
-      ${p.legend ? '<div class="wkcard">👑 <b>Legend.</b> One of the all-time greats.</div>' : ''}
+      ${p.legend ? '<div class="wkcard">👑 <b>Legend.</b> One of the all-time greats. Retired from international football.</div>' : ''}
       ${E.isWonderkid(p) ? `<div class="wkcard">🌟 <b>Wonderkid.</b> One of the most talented young players around${mine ? ': give him minutes and he will fly.' : '.'}</div>` : ''}
       <div class="kv">
         <span>Age</span><span>${p.age}</span>
@@ -765,11 +765,13 @@
     const list = E.legendsMarket();
     return `<h2>Transfer market</h2>
       <div class="chips">${['ALL', 'LEG', 'WK', 'GK', 'DF', 'MF', 'FW'].map((p) => `<button class="btn ${ui.marketPos === p ? 'on' : ''}" data-a="mpos" data-p="${p}">${p === 'WK' ? '🌟 Wonderkids' : p === 'LEG' ? '👑 Legends' : p}</button>`).join('')}</div>
-      <div class="wkcard">👑 <b>Exclusive legends.</b> The greatest players of all time, available at their peak (age 27). Each legend can be signed <b>once per career</b>, and only by you. Budget ${M(u.budget)}.</div>
+      <div class="wkcard">👑 <b>Exclusive legends.</b> The greatest players of all time, available at their peak (age 27). Money can't buy them: they cost <b>Legend Points</b>, and each can be signed <b>once per career</b>. Legends have retired from international football.
+        <div style="margin-top:8px;font-size:18px"><b>⭐ ${E.legendPoints()} Legend Points</b></div>
+        <div class="small muted">Earn them by winning: +${E.POINTS.win} a win, +${E.POINTS.draw} a draw, +${E.POINTS.title} a league title, +${E.POINTS.promotion} promotion, +${E.POINTS.cup} a domestic cup, +${E.POINTS.cl} the Champions League, +${E.POINTS.cc} a Libertadores / AFC title, +${E.POINTS.qualifyCL} Champions League qualification, +${E.POINTS.beatTarget} beating the board's target, +${E.POINTS.goldenBoy} a Golden Boy.</div></div>
       <div class="list">${list.map((l) => `<div class="item">
         ${posTag(l.pos)}<div class="ovr" style="color:var(--accent2)">${l.ovr}</div>
-        <div class="grow"><div class="name">👑 ${esc(l.name)}</div><div class="small muted">${esc((E.nationMeta()[l.nat] || { name: l.nat }).name)} · ${l.signed ? `signed by ${esc(l.signed.club)} (${esc(l.signed.season)})` : M(l.price)}</div></div>
-        ${l.signed ? '<span class="tag">SIGNED</span>' : `<button class="btn ${u.budget >= l.price ? 'primary' : ''}" data-a="legend" data-n="${esc(l.name)}">Sign</button>`}</div>`).join('')}</div>
+        <div class="grow"><div class="name">👑 ${esc(l.name)}</div><div class="small muted">${esc((E.nationMeta()[l.nat] || { name: l.nat }).name)} · ${l.signed ? `signed by ${esc(l.signed.club)} (${esc(l.signed.season)})` : `⭐ ${l.cost} points`}</div></div>
+        ${l.signed ? '<span class="tag">SIGNED</span>' : `<button class="btn ${E.legendPoints() >= l.cost ? 'primary' : ''}" data-a="legend" data-n="${esc(l.name)}">Sign</button>`}</div>`).join('')}</div>
       <p class="small muted">Legends are a fun extra: ratings are playful estimates of each player at his best. They age like anyone else from here.</p>`;
   }
   function viewTransfers() {
@@ -977,6 +979,7 @@
       ${s.qualified ? `<p style="color:var(--accent2);font-weight:800">⭐ Qualified for next season's ${esc(s.clName)}!</p>` : ''}
       ${s.qualifiedCC ? `<p style="color:var(--accent2);font-weight:800">🏆 Qualified for next season's ${esc(s.qualifiedCC)}!</p>` : ''}
       <p><b>${esc(s.verdict)}</b></p>
+      ${s.legendEarned ? `<p class="small">⭐ <b>Legend Points:</b> ${s.legendEarned.length ? s.legendEarned.map(esc).join(', ') + '. ' : ''}You now have ${s.legendPoints}.</p>` : ''}
       ${s.promoted.length ? `<p class="small muted">⬆️ Up: ${s.promoted.map(esc).join(', ')} · ⬇️ Down: ${s.relegated.map(esc).join(', ')}</p>` : ''}
       ${s.retired.length ? `<p class="small"><b>Retired:</b> ${s.retired.map(esc).join(', ')}</p>` : ''}
       ${s.departed.length ? `<p class="small"><b>Contracts expired (left on a free):</b> ${s.departed.map(esc).join(', ')}</p>` : ''}
@@ -1086,7 +1089,7 @@
       case 'legend': {
         const nm = d.n;
         const l = E.legendsMarket().find((x) => x.name === nm);
-        ask(`Sign ${nm} (${l.pos}, ${l.ovr}) for ${M(l.price)}? This is a one-time chance: once signed, no one else can ever have him.`, 'Sign the legend', () => {
+        ask(`Sign ${nm} (${l.pos}, ${l.ovr}) for ${l.cost} Legend Points (you have ${E.legendPoints()})? This is a one-time chance: once signed, no one else can ever have him.`, 'Sign the legend', () => {
           const r = E.signLegend(nm);
           if (r.ok) { save(); toast(`👑 ${nm} has signed!`); } else toast(r.why);
           render();

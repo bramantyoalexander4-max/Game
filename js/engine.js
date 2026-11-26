@@ -2,7 +2,7 @@
 (function (root) {
   'use strict';
 
-  const SAVE_VERSION = 9;
+  const SAVE_VERSION = 10;
   let G = null; // current game state
 
   // ---------- random ----------
@@ -297,7 +297,7 @@
       seed: (seed === undefined ? Math.floor(Math.random() * 2 ** 31) : seed) >>> 0,
       manager: managerName || 'Manager',
       season: 1, week: 0, userClub: national ? 0 : clubIndex, mode: national ? 'national' : 'club',
-      nations: [], intl: null, ccs: [], ccNext: {}, legendsSigned: {},
+      nations: [], intl: null, ccs: [], ccNext: {}, legendsSigned: {}, legendPoints: 0,
       clubs: [], players: {}, freeAgents: [], nextPid: 1,
       fixtures: [], calendar: [], cups: [], cl: null, clNext: null, news: [], history: [], training: 'normal',
       boardWarning: false, gameOver: false, seasonOver: false,
@@ -981,6 +981,8 @@
         p.morale = clamp(p.morale + dm + (m.appeared.has(p.id) ? 2 : -2), 10, 100);
       });
     });
+    const mySide = m.sides.indexOf(G.userClub);
+    if (mySide >= 0) awardPoints(res[mySide] === 'W' ? POINTS.win : res[mySide] === 'D' ? POINTS.draw : 0);
     m.scorers.forEach((s) => { player(s.pid).goals++; });
     m.assists.forEach((pid) => { player(pid).assists++; });
     Object.entries(m.yellows).forEach(([pid, n]) => { player(pid).yellow += n >= 2 ? 0 : 1; });
@@ -1121,10 +1123,10 @@
     return m;
   };
   let natGroups = null; // nationality -> players, built once per call-up round
-  const eligible = (code) => (natGroups ? (natGroups[code] || []) : Object.values(G.players).filter((p) => p.nat === code && !p.academy));
+  const eligible = (code) => (natGroups ? (natGroups[code] || []) : Object.values(G.players).filter((p) => p.nat === code && !p.academy && !p.legend));
   function withNatGroups(fn) {
     natGroups = {};
-    Object.values(G.players).forEach((p) => { if (p.nat && !p.academy) (natGroups[p.nat] = natGroups[p.nat] || []).push(p); });
+    Object.values(G.players).forEach((p) => { if (p.nat && !p.academy && !p.legend) (natGroups[p.nat] = natGroups[p.nat] || []).push(p); });
     try { return fn(); } finally { natGroups = null; }
   }
   function createNations(mustInclude) {
@@ -1174,12 +1176,14 @@
         n.squad = n.squad.filter((id) => G.players[id] && G.players[id].nat === n.code);
         validateLineup(n.id);
       } else callUp(n);
+      n.squad = n.squad.filter((id) => G.players[id] && !G.players[id].legend);
     }));
   }
   // national-team squad management for the user
   function canCallUp(pid) {
     const n = userClub(), p = player(pid);
     if (!p || p.nat !== n.code) return { ok: false, why: 'Not eligible for your country.' };
+    if (p.legend) return { ok: false, why: 'Legends have retired from international football.' };
     if (n.squad.includes(pid)) return { ok: false, why: 'Already in the squad.' };
     if (n.squad.length >= INTL_SQUAD) return { ok: false, why: `The squad is full (${INTL_SQUAD}). Drop someone first.` };
     return { ok: true };
@@ -1457,13 +1461,18 @@
     p.wage = Math.round(wageFor(p) * 1.2 / 100) * 100;
     return p;
   }
-  function legendPrice(def) {
-    const v = playerValue({ ovr: def.ovr, pot: def.ovr, age: 27 });
-    return Math.round(v * 0.8 * (G.meta.prizeScale || 1) / 100000) * 100000;
+  // legends cost Legend Points, earned by winning (never money)
+  const legendCost = (def) => 40 + Math.pow(Math.max(0, def.ovr - 80), 2);
+  const legendPoints = () => G.legendPoints || 0;
+  function awardPoints(n, why) {
+    if (G.mode === 'national' || !n) return;
+    G.legendPoints = legendPoints() + n;
+    if (why) pushNews(`⭐ +${n} Legend Points: ${why}.`);
   }
+  const POINTS = { win: 3, draw: 1, title: 60, promotion: 40, cup: 30, cl: 80, cc: 60, qualifyCL: 15, beatTarget: 25, goldenBoy: 15 };
   function legendsMarket() {
     G.legendsSigned = G.legendsSigned || {};
-    return legendDefs().map((d) => ({ ...d, price: legendPrice(d), signed: G.legendsSigned[d.name] || null }))
+    return legendDefs().map((d) => ({ ...d, cost: legendCost(d), signed: G.legendsSigned[d.name] || null }))
       .sort((a, b) => b.ovr - a.ovr || a.name.localeCompare(b.name));
   }
   function signLegend(name) {
@@ -1472,15 +1481,15 @@
     if (!def) return { ok: false, why: 'Unknown legend.' };
     G.legendsSigned = G.legendsSigned || {};
     if (G.legendsSigned[name]) return { ok: false, why: `${name} has already been signed (${G.legendsSigned[name].club}, ${G.legendsSigned[name].season}).` };
-    const u = userClub(), price = legendPrice(def);
+    const u = userClub(), cost = legendCost(def);
     if (u.squad.length >= MAX_SQUAD) return { ok: false, why: `Your squad is full (${MAX_SQUAD}).` };
-    if (u.budget < price) return { ok: false, why: `You need ${money(price)} to sign ${name}.` };
+    if (legendPoints() < cost) return { ok: false, why: `You need ${cost} Legend Points to sign ${name} (you have ${legendPoints()}).` };
     const p = legendPlayer(def);
-    u.budget -= price;
+    G.legendPoints = legendPoints() - cost;
     addPlayer(p, u.id);
     p.contract = 3;
     G.legendsSigned[name] = { club: u.name, season: seasonName() };
-    pushNews(`🌟🏆 LEGEND SIGNED: ${name} (${def.pos}, ${def.ovr}) joins ${u.name} for ${money(price)}!`);
+    pushNews(`👑 LEGEND SIGNED: ${name} (${def.pos}, ${def.ovr}) joins ${u.name} for ${cost} Legend Points!`);
     return { ok: true, pid: p.id };
   }
 
@@ -1870,6 +1879,19 @@
         ? `Relegated from the ${divName(div)} when the board expected ${ordinal(exp)}.`
         : `Finished ${ordinal(pos)} in the ${divName(div)} when the board expected ${ordinal(exp)}.`;
     }
+    // Legend Points for the season's achievements
+    const earned = [];
+    const earn = (n, why) => { earned.push(`+${n} ${why}`); G.legendPoints = legendPoints() + n; };
+    if (pos === 1) earn(POINTS.title, `${divName(div)} title`);
+    if (wentUp) earn(POINTS.promotion, 'promotion');
+    if (uci >= 0 && G.cups[uci].winner === G.userClub) earn(POINTS.cup, cupName());
+    if (G.cl && G.cl.winner === G.userClub) earn(POINTS.cl, clName());
+    if (myCC >= 0 && G.ccs[myCC].winner === G.userClub) earn(POINTS.cc, G.ccs[myCC].name);
+    if (summary.qualified) earn(POINTS.qualifyCL, `${clName()} qualification`);
+    if (pos <= exp - 2) earn(POINTS.beatTarget, "beating the board's target");
+    if (summary.goldenBoyMine) earn(POINTS.goldenBoy, 'Golden Boy winner');
+    summary.legendEarned = earned;
+    summary.legendPoints = legendPoints();
     G.history.push({ season: G.season, division: div, position: pos, points: summary.points,
       champion: summary.champion, cup: summary.cup, cl: summary.cl || summary.cc, move: summary.move });
     }
@@ -2063,6 +2085,12 @@
         G.meta.ccs = (ROOT.TM_CONTINENTAL_EXTRA || []).filter((cc) => Object.keys(cc.slots).every((c) => divOf(c) > 0))
           .map((cc) => ({ key: cc.key, name: cc.name, icon: cc.icon, slots: Object.fromEntries(Object.entries(cc.slots).map(([c, n]) => [divOf(c), n])) }));
       }
+      G.version = 9;
+    }
+    if (G.version === 9) {
+      // v9 sold legends for money and let them play internationally
+      G.legendPoints = 0;
+      Object.values(G.players).forEach((p) => { if (p.legend) (G.nations || []).forEach((n) => { n.squad = n.squad.filter((id) => id !== p.id); }); });
       G.version = SAVE_VERSION;
     }
     return G;
@@ -2082,7 +2110,7 @@
     clName, clResult, clStandings, tiePrize, userCupIdx, cupOfCountry, CL_KO_ROUNDS,
     NATION_BASE, INTL_SQUAD, T_KO, STAGE_TEXT, EXPECT_TEXT, nationMeta, nationRanking, eligible, canCallUp, callUpPlayer, dropPlayer,
     autoSquad, previewNations, nlResultText, intlName,
-    CC_KO, ccOf, ccResult, legendsMarket, signLegend, intlStage, intlExpectation, intlOutlook, groupStandings, tournamentRoundName,
+    CC_KO, ccOf, ccResult, legendsMarket, signLegend, legendPoints, POINTS, intlStage, intlExpectation, intlOutlook, groupStandings, tournamentRoundName,
     ACADEMY_MAX, ACADEMY_GRAD_AGE, RENEW_WINDOW, academyUpgradeCost, academyUpkeep, academyIntake, prospects,
     potentialRange, upgradeAcademy, promoteProspect, releaseProspect,
     contractEnds, canNegotiate, offerContract, expiringPlayers, signingLength,
