@@ -65,7 +65,26 @@
     clearTimeout(toast.t);
     toast.t = setTimeout(() => t.classList.add('hidden'), 2600);
   }
-  function openModal(html) { modalBox.innerHTML = html; modal.classList.remove('hidden'); }
+  // ---------- device preferences (kept apart from the career save) ----------
+  const PREF_KEY = 'touchline-prefs';
+  const prefs = (() => { try { return { vibrate: true, ...JSON.parse(localStorage.getItem(PREF_KEY) || '{}') }; } catch (e) { return { vibrate: true }; } })();
+  const savePrefs = () => { try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch (e) { /* ignore */ } };
+  // vibrate: the Android app exposes a native bridge; browsers fall back to the Vibration API
+  function buzz(pattern) {
+    if (!prefs.vibrate) return;
+    try {
+      if (window.TouchlineNative && window.TouchlineNative.vibrate) window.TouchlineNative.vibrate(JSON.stringify(pattern));
+      else if (navigator.vibrate) navigator.vibrate(pattern);
+    } catch (e) { /* vibration unavailable */ }
+  }
+  // colour-code every rating badge: elite, very good, good, squad
+  function tierRatings(root) {
+    root.querySelectorAll('.ovr').forEach((el) => {
+      const v = parseInt(el.textContent, 10);
+      if (!isNaN(v)) el.dataset.t = v >= 85 ? 's' : v >= 78 ? 'a' : v >= 70 ? 'b' : 'c';
+    });
+  }
+  function openModal(html) { modalBox.innerHTML = html; modal.classList.remove('hidden'); tierRatings(modalBox); }
   // in-page confirm dialog (window.confirm is blocked in sandboxed viewers)
   let pendingConfirm = null;
   function ask(text, yesLabel, onYes, noLabel = 'Cancel', onNo = null) {
@@ -150,12 +169,20 @@
       </div>
       <main>${body}</main>
       <nav class="tabs"><div class="inner">${TABS.map(([k, i, l]) => `<button data-a="tab" data-t="${k}" class="${ui.tab === k ? 'on' : ''}"><span>${i}</span>${l}</button>`).join('')}</div></nav>`;
+    afterRender();
     // keep the selected chip of each scrolling row in view
     app.querySelectorAll('.chips').forEach((row) => {
       const on = row.querySelector('.btn.on');
       if (on) row.scrollLeft = on.offsetLeft - row.offsetLeft - (row.clientWidth - on.offsetWidth) / 2;
     });
   }
+
+  function afterRender() {
+    tierRatings(app);
+    const main = app.querySelector('main');
+    if (main && ui.lastTab !== ui.tab) { main.classList.add('enter'); ui.lastTab = ui.tab; }
+  }
+  const vibrateToggle = () => `<button class="btn" data-a="toggle-vibrate">📳 Vibrate on goals: ${prefs.vibrate ? 'On' : 'Off'}</button>`;
 
   // ---------- national team career ----------
   function renderNational() {
@@ -171,6 +198,7 @@
       </div>
       <main>${body}</main>
       <nav class="tabs"><div class="inner">${NTABS.map(([k, i, l]) => `<button data-a="tab" data-t="${k}" class="${ui.tab === k ? 'on' : ''}"><span>${i}</span>${l}</button>`).join('')}</div></nav>`;
+    afterRender();
     app.querySelectorAll('.chips').forEach((row) => {
       const on = row.querySelector('.btn.on');
       if (on) row.scrollLeft = on.offsetLeft - row.offsetLeft - (row.clientWidth - on.offsetWidth) / 2;
@@ -275,7 +303,8 @@
       <h2>Your record</h2>
       <div class="list">${hist.length ? hist.map((h) => `<div class="item"><div class="grow">${E.seasonName(h.season)}</div><b>${esc(h.result)}</b></div>`).join('') : '<div class="news muted">Your first season is under way.</div>'}</div>
       <h2>Game</h2>
-      <div class="btns"><button class="btn" data-a="save">💾 Save</button><button class="btn danger" data-a="new-career">New career</button></div>`;
+      <div class="btns"><button class="btn" data-a="save">💾 Save</button><button class="btn danger" data-a="new-career">New career</button></div>
+      <div class="btns" style="margin-top:8px">${vibrateToggle()}</div>`;
   }
   function natTable(ids, table) {
     const g = G();
@@ -836,6 +865,7 @@
         <div class="grow">${E.seasonName(a.season)}<div class="small muted">${esc(a.club)}</div></div><b>${esc(a.name)}</b><span class="muted small">${a.ovr}</span></div>`).join('')}</div>` : ''}
       <h2>Game</h2>
       <div class="btns"><button class="btn" data-a="save">💾 Save</button><button class="btn danger" data-a="new-career">New career</button></div>
+      <div class="btns" style="margin-top:8px">${vibrateToggle()}</div>
       <p class="small muted">Progress also saves automatically after every matchday (in this browser).</p>`;
   }
 
@@ -864,12 +894,32 @@
       const m = ui.match;
       const before = m.events.length;
       E.stepMatch(m);
-      // pause briefly on goals so they land
-      const goal = m.events.slice(before).some((e) => e.type === 'goal' || e.type === 'red');
+      const fresh = m.events.slice(before);
+      const goals = fresh.filter((e) => e.type === 'goal');
+      // pause briefly on goals and red cards so they land
+      const big = goals.length || fresh.some((e) => e.type === 'red');
       renderMatch();
+      goals.forEach((e) => celebrate(m, e));
       if (m.done) { clearInterval(ui.matchTimer); return; }
-      if (goal && ui.matchSpeed < 4) { clearInterval(ui.matchTimer); setTimeout(runClock, 900); }
+      if (big && ui.matchSpeed < 4) { clearInterval(ui.matchTimer); setTimeout(runClock, goals.length ? 1700 : 900); }
     }, delay);
+  }
+  function celebrate(m, e) {
+    const team = E.club(m.sides[e.side]);
+    const mine = m.sides[e.side] === G().userClub;
+    buzz(mine ? [90, 60, 90, 60, 260] : [170]);
+    const host = document.getElementById('match');
+    if (!host) return;
+    const scorer = (/— ([^(.]+)/.exec(e.text) || [])[1] || '';
+    const el = document.createElement('div');
+    el.className = `goal-burst ${mine ? 'mine' : 'theirs'}`;
+    el.style.setProperty('--team', team.color);
+    el.innerHTML = `<div class="gb-inner"><div class="gb-ball">⚽</div><div class="gb-title">${mine ? 'GOAL!' : 'Goal'}</div>
+      <div class="gb-team">${esc(team.name)}</div><div class="gb-scorer">${esc(scorer.trim())} ${e.min}'</div>
+      <div class="gb-score">${m.score[0]} - ${m.score[1]}</div></div>`;
+    host.appendChild(el);
+    setTimeout(() => el.classList.add('out'), 1300);
+    setTimeout(() => el.remove(), 1700);
   }
   function renderMatch() {
     const m = ui.match;
@@ -1154,6 +1204,7 @@
       }
       case 'training': G().training = d.k; render(); break;
       case 'save': save(); toast('Game saved.'); break;
+      case 'toggle-vibrate': prefs.vibrate = !prefs.vibrate; savePrefs(); if (prefs.vibrate) buzz([60]); render(); break;
       // match controls
       case 'm-pause': ui.matchPaused = !ui.matchPaused; renderMatch(); runClock(); break;
       case 'm-speed': ui.matchSpeed = +d.s; renderMatch(); runClock(); break;
