@@ -67,7 +67,7 @@
   }
   // ---------- device preferences (kept apart from the career save) ----------
   const PREF_KEY = 'touchline-prefs';
-  const prefs = (() => { try { return { vibrate: true, ...JSON.parse(localStorage.getItem(PREF_KEY) || '{}') }; } catch (e) { return { vibrate: true }; } })();
+  const prefs = (() => { try { return { vibrate: true, sound: true, ...JSON.parse(localStorage.getItem(PREF_KEY) || '{}') }; } catch (e) { return { vibrate: true, sound: true }; } })();
   const savePrefs = () => { try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch (e) { /* ignore */ } };
   // vibrate: the Android app exposes a native bridge; browsers fall back to the Vibration API
   function buzz(pattern) {
@@ -77,6 +77,120 @@
       else if (navigator.vibrate) navigator.vibrate(pattern);
     } catch (e) { /* vibration unavailable */ }
   }
+  // ---------- match sounds: synthesized with Web Audio, so no audio files are shipped ----------
+  const Sfx = (() => {
+    let ctx = null, master = null, noise = null, amb = null;
+    function init() {
+      if (!prefs.sound) return null;
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      if (!ctx) {
+        try { ctx = new AC(); } catch (e) { return null; }
+        master = ctx.createGain(); master.gain.value = 0.9; master.connect(ctx.destination);
+        // 4 s of pinkish noise, the raw material of every crowd sound
+        noise = ctx.createBuffer(1, ctx.sampleRate * 4, ctx.sampleRate);
+        const d = noise.getChannelData(0);
+        let b0 = 0, b1 = 0, b2 = 0;
+        for (let i = 0; i < d.length; i++) {
+          const w = Math.random() * 2 - 1;
+          b0 = 0.99765 * b0 + w * 0.099; b1 = 0.963 * b1 + w * 0.2965; b2 = 0.57 * b2 + w * 1.0526;
+          d[i] = (b0 + b1 + b2 + w * 0.1848) * 0.2;
+        }
+      }
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+      return ctx;
+    }
+    function src(loop) { const n = ctx.createBufferSource(); n.buffer = noise; n.loop = !!loop; n.playbackRate.value = 0.9 + Math.random() * 0.2; return n; }
+    function band(f, q) { const b = ctx.createBiquadFilter(); b.type = 'bandpass'; b.frequency.value = f; b.Q.value = q; return b; }
+    // a crowd "voice": noise through vowel formants, with an envelope
+    function crowd({ vol, attack, hold, release, formants, sweep, delay = 0 }) {
+      const t = ctx.currentTime + delay;
+      const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vol, t + attack);
+      g.gain.setValueAtTime(vol, t + attack + hold);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + attack + hold + release);
+      g.connect(master);
+      const n = src(true);
+      formants.forEach(([f, q, v]) => {
+        const b = band(f, q), fg = ctx.createGain(); fg.gain.value = v;
+        if (sweep) b.frequency.exponentialRampToValueAtTime(f * sweep, t + attack + hold + release);
+        n.connect(b); b.connect(fg); fg.connect(g);
+      });
+      n.start(t, Math.random() * 3); n.stop(t + attack + hold + release + 0.1);
+    }
+    function tone(type, f, t, dur, vol, f2) {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = type; o.frequency.setValueAtTime(f, t);
+      if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + dur);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.02);
+      g.gain.setValueAtTime(vol, t + dur - 0.05); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g); g.connect(master); o.start(t); o.stop(t + dur + 0.05);
+    }
+    function whistle(blasts) {
+      if (!init()) return;
+      let t = ctx.currentTime + 0.05;
+      blasts.forEach((len) => {
+        // a pea whistle: a high tone with a fast warble
+        const o = ctx.createOscillator(), lfo = ctx.createOscillator(), lg = ctx.createGain(), g = ctx.createGain();
+        o.type = 'sine'; o.frequency.value = 2900; lfo.frequency.value = 38; lg.gain.value = 180;
+        lfo.connect(lg); lg.connect(o.frequency);
+        g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.16, t + 0.02);
+        g.gain.setValueAtTime(0.16, t + len - 0.04); g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+        o.connect(g); g.connect(master); o.start(t); lfo.start(t); o.stop(t + len + 0.05); lfo.stop(t + len + 0.05);
+        t += len + 0.16;
+      });
+    }
+    return {
+      unlock() { init(); },
+      // the steady murmur of the stadium while a live match is on
+      startAmbience() {
+        if (!init() || amb) return;
+        const n = src(true), b = band(520, 0.6), g = ctx.createGain(), lfo = ctx.createOscillator(), lg = ctx.createGain();
+        g.gain.value = 0.0001; g.gain.exponentialRampToValueAtTime(0.11, ctx.currentTime + 1.5);
+        lfo.frequency.value = 0.13; lg.gain.value = 0.035; lfo.connect(lg); lg.connect(g.gain);
+        n.connect(b); b.connect(g); g.connect(master); n.start(); lfo.start();
+        amb = { n, g, lfo };
+      },
+      stopAmbience() {
+        if (!amb || !ctx) return;
+        const { n, g, lfo } = amb; amb = null;
+        g.gain.cancelScheduledValues(ctx.currentTime);
+        g.gain.setValueAtTime(Math.max(0.0001, g.gain.value), ctx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.8);
+        n.stop(ctx.currentTime + 0.9); lfo.stop(ctx.currentTime + 0.9);
+      },
+      kickoff() { whistle([0.45]); },
+      halfTime() { whistle([0.3, 0.6]); },
+      fullTime() { whistle([0.3, 0.3, 0.9]); },
+      goal(mine) {
+        if (!init()) return;
+        if (mine) {
+          // the home end erupts: a big "aaah" roar, then a swell of cheering and a horn
+          crowd({ vol: 0.9, attack: 0.12, hold: 1.6, release: 2.4, formants: [[700, 1.2, 1], [1150, 1.5, 0.7], [2500, 2, 0.35], [280, 0.8, 0.6]] });
+          crowd({ vol: 0.45, attack: 0.5, hold: 1.2, release: 2, formants: [[1800, 3, 0.8], [3200, 4, 0.5]], delay: 0.3 });
+          const t = ctx.currentTime + 0.25;
+          [[233, 0], [294, 0], [349, 0]].forEach(([f]) => tone('sawtooth', f, t, 0.9, 0.035));
+          [[233], [294], [349]].forEach(([f]) => tone('sawtooth', f, t + 1.05, 1.1, 0.035));
+        } else {
+          // the home crowd groans, and the away end cheers in the distance
+          crowd({ vol: 0.5, attack: 0.15, hold: 0.5, release: 1.4, sweep: 0.45, formants: [[650, 1.5, 1], [1000, 2, 0.6]] });
+          crowd({ vol: 0.18, attack: 0.15, hold: 1, release: 1.5, formants: [[900, 1.5, 1], [2200, 2.5, 0.4]], delay: 0.1 });
+        }
+      },
+      // a near miss: "ooooh"
+      chance() {
+        if (!init()) return;
+        crowd({ vol: 0.32, attack: 0.25, hold: 0.25, release: 0.9, sweep: 0.7, formants: [[420, 3, 1], [800, 4, 0.5]] });
+      },
+      // a red card: whistles and jeers
+      boo() {
+        if (!init()) return;
+        crowd({ vol: 0.3, attack: 0.3, hold: 0.8, release: 1, formants: [[330, 4, 1], [600, 5, 0.5]] });
+      },
+      pause(on) { if (ctx) (on ? ctx.suspend() : ctx.resume()).catch(() => {}); },
+    };
+  })();
+  document.addEventListener('visibilitychange', () => Sfx.pause(document.hidden));
   // colour-code every rating badge: elite, very good, good, squad
   function tierRatings(root) {
     root.querySelectorAll('.ovr').forEach((el) => {
@@ -182,7 +296,8 @@
     const main = app.querySelector('main');
     if (main && ui.lastTab !== ui.tab) { main.classList.add('enter'); ui.lastTab = ui.tab; }
   }
-  const vibrateToggle = () => `<button class="btn" data-a="toggle-vibrate">📳 Vibrate on goals: ${prefs.vibrate ? 'On' : 'Off'}</button>`;
+  const vibrateToggle = () => `<button class="btn" data-a="toggle-vibrate">📳 Vibrate on goals: ${prefs.vibrate ? 'On' : 'Off'}</button>
+    <button class="btn" data-a="toggle-sound">🔊 Match sounds: ${prefs.sound ? 'On' : 'Off'}</button>`;
 
   // ---------- national team career ----------
   function renderNational() {
@@ -883,8 +998,17 @@
       while (!m.done) E.stepMatch(m, { autoUser: true });
       return finishMatch();
     }
+    Sfx.startAmbience(); Sfx.kickoff();
     renderMatch();
     runClock();
+  }
+  function matchSounds(m, fresh) {
+    fresh.forEach((e) => {
+      if (e.type === 'chance' && Math.random() < 0.6) Sfx.chance();
+      else if (e.type === 'red') Sfx.boo();
+      else if (e.type === 'info' && /Half-time/.test(e.text)) Sfx.halfTime();
+      else if (e.type === 'info' && /Full-time/.test(e.text)) { Sfx.fullTime(); Sfx.stopAmbience(); }
+    });
   }
   function runClock() {
     clearInterval(ui.matchTimer);
@@ -899,6 +1023,7 @@
       // pause briefly on goals and red cards so they land
       const big = goals.length || fresh.some((e) => e.type === 'red');
       renderMatch();
+      matchSounds(m, fresh.filter((e) => e.type !== 'goal'));
       goals.forEach((e) => celebrate(m, e));
       if (m.done) { clearInterval(ui.matchTimer); return; }
       if (big && ui.matchSpeed < 4) { clearInterval(ui.matchTimer); setTimeout(runClock, goals.length ? 1700 : 900); }
@@ -908,6 +1033,7 @@
     const team = E.club(m.sides[e.side]);
     const mine = m.sides[e.side] === G().userClub;
     buzz(mine ? [90, 60, 90, 60, 260] : [170]);
+    Sfx.goal(mine);
     const host = document.getElementById('match');
     if (!host) return;
     const scorer = (/— ([^(.]+)/.exec(e.text) || [])[1] || '';
@@ -979,6 +1105,7 @@
   }
   function finishMatch() {
     clearInterval(ui.matchTimer);
+    Sfx.stopAmbience();
     const m = ui.match;
     E.applyResult(m);
     const others = E.playOtherMatches(m.fx);
@@ -1204,11 +1331,12 @@
       }
       case 'training': G().training = d.k; render(); break;
       case 'save': save(); toast('Game saved.'); break;
+      case 'toggle-sound': prefs.sound = !prefs.sound; savePrefs(); if (!prefs.sound) Sfx.stopAmbience(); else Sfx.kickoff(); render(); break;
       case 'toggle-vibrate': prefs.vibrate = !prefs.vibrate; savePrefs(); if (prefs.vibrate) buzz([60]); render(); break;
       // match controls
       case 'm-pause': ui.matchPaused = !ui.matchPaused; renderMatch(); runClock(); break;
       case 'm-speed': ui.matchSpeed = +d.s; renderMatch(); runClock(); break;
-      case 'm-skip': clearInterval(ui.matchTimer); while (!ui.match.done) E.stepMatch(ui.match); renderMatch(); break;
+      case 'm-skip': clearInterval(ui.matchTimer); while (!ui.match.done) E.stepMatch(ui.match); Sfx.stopAmbience(); Sfx.fullTime(); renderMatch(); break;
       case 'm-ment': { const m = ui.match; m.ments[m.sides.indexOf(G().userClub)] = d.m; renderMatch(); break; }
       case 'm-tactics': ui.matchSwap = null; matchTacticsModal(); break;
       case 'm-swap': {
