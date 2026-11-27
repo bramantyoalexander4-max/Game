@@ -830,7 +830,7 @@
 
   // ---------- tactics ----------
   const ROW_Y = { GK: 90, DF: 70, MF: 45, FW: 18 };
-  function pitchHtml(lineup, selIdx, fitMap, action) {
+  function pitchHtml(lineup, selIdx, fitMap, action, roles) {
     const groups = { GK: [], DF: [], MF: [], FW: [] };
     lineup.forEach((l, i) => groups[l.slot].push(i));
     return `<div class="pitch">${lineup.map((l, i) => {
@@ -840,54 +840,89 @@
       const off = p.pos !== l.slot;
       const fit = fitMap ? fitMap[p.id] : p.fitness;
       return `<div class="slot ${selIdx === i ? 'sel' : ''} ${off ? 'off' : ''}" style="left:${x}%;top:${ROW_Y[l.slot]}%" data-a="${action}" data-i="${i}">
-        <div class="shirt">${p.ovr}</div><div class="nm">${esc(p.name.split(' ').slice(-1)[0])}${off ? ' (' + p.pos + ')' : ''}</div>
+        <div class="shirt">${p.ovr}${roleBadge(l.slot, l.role || (roles && roles[i]))}</div><div class="nm">${esc(p.name.split(' ').slice(-1)[0])}${off ? ' (' + p.pos + ')' : ''}</div>
         <div style="margin:2px auto 0;width:40px">${bar(fit)}</div></div>`;
     }).join('')}</div>`;
   }
   const INSTR_HELP = {
     pressing: 'High press wins the ball higher up and blunts their attack, but tires your players faster. A low block is solid and saves legs.',
     tempo: 'Direct play creates more chances for both sides; patient play slows the game down and keeps you compact.',
+    width: 'Wide stretches the opponent and suits wingers, but leaves gaps between your defenders. Narrow is compact and protects the middle.',
+    line: 'A high line squeezes the pitch and helps you win midfield, but leaves space in behind for direct balls and counters. A deep line is safer but cedes midfield.',
+    focus: 'Where your attacks go. Flanks work against narrow teams (and suit a target man); the middle works against wide teams (and suits a false nine).',
+    counter: 'Counter-attack gives up some possession to break fast when you win the ball: deadly against high lines and attacking teams, toothless against a deep block.',
   };
-  function instrRows(pressing, tempo, action) {
-    const row = (key, table, cur) => `<div class="btns" style="margin-bottom:4px">${Object.entries(table).map(([k, v]) =>
-      `<button class="btn ${cur === k ? 'on' : ''}" data-a="${action}" data-k="${key}" data-v="${k}">${v.label}</button>`).join('')}</div>
-      <p class="small muted" style="margin:0 4px 10px">${INSTR_HELP[key]}</p>`;
-    return `<h2>Pressing</h2>${row('pressing', E.PRESSING, pressing)}<h2>Tempo</h2>${row('tempo', E.TEMPO, tempo)}`;
+  const roleBadge = (slot, role) => { const R = role && E.ROLES[slot] && E.ROLES[slot][role]; return R && (slot !== 'GK' || role === 'sk') ? `<span class="rl">${R.short}</span>` : ''; };
+  function instrRows(ins, action) {
+    return Object.entries(E.INSTRUCTIONS).map(([key, d]) => `<h2>${d.name}</h2><div class="btns" style="margin-bottom:4px">${Object.entries(d.table).map(([k, v]) =>
+      `<button class="btn ${ins[key] === k ? 'on' : ''}" data-a="${action}" data-k="${key}" data-v="${k}">${v.label}</button>`).join('')}</div>
+      <p class="small muted" style="margin:0 4px 10px">${INSTR_HELP[key]}</p>`).join('');
+  }
+  function famBar(v) { return `<span class="fam ${v >= 90 ? 'hi' : v >= 70 ? 'mid' : 'lo'}">${v}%</span>`; }
+  function scoutCard(withIdeas = true) {
+    const fx = E.nextUserFixture();
+    if (!fx) return '';
+    const me = G().userClub, opp = fx.home === me ? fx.away : fx.home;
+    const r = E.matchupReport(me, opp), oc = E.club(opp);
+    const li = (arr, icon) => arr.map((t) => `<div class="small" style="margin:3px 0">${icon} ${esc(t)}</div>`).join('');
+    return `<div class="card scout"><div class="row between"><b>🔎 Next: ${esc(oc.name)}</b><span class="small muted">${esc(r.formation)} · ${esc(r.style)}</span></div>
+      ${li(r.forYou, '✅')}${li(r.against, '⚠️')}
+      ${!r.forYou.length && !r.against.length ? '<div class="small muted" style="margin:3px 0">Neither side\'s style has an edge right now.</div>' : ''}
+      ${withIdeas && r.ideas.length ? `<div class="small" style="margin-top:6px"><b>Assistant suggests:</b> ${r.ideas.map(esc).join(' · ')}</div>` : ''}</div>`;
+  }
+  function rolesList(lineup, roles, action) {
+    return `<div class="list">${lineup.map((l, i) => {
+      const p = E.player(l.pid), role = l.role || roles[i], R = E.ROLES[l.slot][role];
+      return `<div class="item tap" data-a="${action}" data-i="${i}">${posTag(l.slot)}<div class="grow"><div class="name">${esc(p.name)}</div>
+        <div class="small muted">${esc(R.label)}</div></div><span class="tag">${R.short}</span><span class="muted">›</span></div>`;
+    }).join('')}</div>`;
+  }
+  function roleModal(slot, current, name, i, action, back) {
+    openModal(`<b>Role for ${esc(name)}</b><p class="small muted" style="margin:4px 0 8px">${slot} position</p>
+      <div class="list">${Object.entries(E.ROLES[slot]).map(([k, R]) => `<div class="item tap ${k === current ? 'sel' : ''}" data-a="${action}" data-i="${i}" data-r="${k}">
+        <span class="tag">${R.short}</span><div class="grow"><div class="name">${esc(R.label)}${k === current ? ' ✓' : ''}</div><div class="small muted">${esc(R.desc)}</div></div></div>`).join('')}</div>
+      <button class="btn block" style="margin-top:8px" data-a="${back}">Back</button>`);
   }
   function viewTactics() {
     const c = E.userClub();
     const lineup = E.validateLineup(c.id);
+    const roles = E.rolesOf(c);
+    const ins = E.instrOf(c);
     const inXI = new Set(lineup.map((l) => l.pid));
     const bench = E.squadOf(c.id).filter((p) => !inXI.has(p.id))
       .sort((a, b) => E.POS_ORDER[a.pos] - E.POS_ORDER[b.pos] || b.ovr - a.ovr);
-    const s = strengthOf(c);
+    const s = E.teamRatings(c.id);
     const selIdx = typeof ui.tacticSel === 'number' ? ui.tacticSel : null;
     const selBench = typeof ui.tacticSel === 'string' ? +ui.tacticSel.slice(2) : null;
-    return `<h2>Formation</h2>
-      <div class="chips">${Object.keys(E.FORMATIONS).map((f) => `<button class="btn ${c.formation === f ? 'on' : ''}" data-a="formation" data-f="${f}">${f}</button>`).join('')}</div>
-      <h2>Mentality</h2>
-      <div class="btns" style="margin-bottom:12px">${Object.keys(E.MENTALITY).map((m) => `<button class="btn ${c.mentality === m ? 'on' : ''}" data-a="mentality" data-m="${m}">${m[0].toUpperCase() + m.slice(1)}</button>`).join('')}</div>
-      ${instrRows(c.pressing || 'normal', c.tempo || 'normal', 'instr')}
-      <div class="card stats3"><div><b>${s.att}</b><span class="small muted">Attack</span></div><div><b>${s.mid}</b><span class="small muted">Midfield</span></div><div><b>${s.def}</b><span class="small muted">Defence</span></div></div>
+    const sub = ui.tacView || 'team';
+    const tabs = `<div class="chips">${[['team', '👕 Team'], ['instr', '🧠 Instructions'], ['roles', '🎯 Roles']].map(([k, l]) =>
+      `<button class="btn ${sub === k ? 'on' : ''}" data-a="tac-view" data-v="${k}">${l}</button>`).join('')}</div>`;
+    const ratings = `<div class="card stats3"><div><b>${s.att}</b><span class="small muted">Attack</span></div><div><b>${s.mid}</b><span class="small muted">Midfield</span></div><div><b>${s.def}</b><span class="small muted">Defence</span></div></div>`;
+    const style = `<p class="small muted" style="margin:0 4px 8px">Style: <b>${esc(E.styleName(c.mentality, ins))}</b> · ${esc(c.formation)} · familiarity ${famBar(E.familiarity(c))}</p>`;
+    if (sub === 'instr') {
+      return tabs + style + `<h2>Presets</h2>
+        <div class="chips">${Object.entries(E.PRESETS).map(([k, pr]) => `<button class="btn" data-a="preset" data-p="${k}">${pr.label}</button>`).join('')}</div>
+        <p class="small muted" style="margin:0 4px 10px">A preset sets your mentality and every instruction below in one go. Fine-tune afterwards.</p>
+        <h2>Mentality</h2>
+        <div class="btns" style="margin-bottom:12px">${Object.keys(E.MENTALITY).map((m) => `<button class="btn ${c.mentality === m ? 'on' : ''}" data-a="mentality" data-m="${m}">${m[0].toUpperCase() + m.slice(1)}</button>`).join('')}</div>
+        ${instrRows(ins, 'instr')}${ratings}${scoutCard()}`;
+    }
+    if (sub === 'roles') {
+      return tabs + style + `<p class="small muted" style="margin:0 4px 8px">Each position on the pitch has a role. Roles shift your attack, midfield and defence, decide who shoots and creates, and work best with the right instructions (a winger needs width, a target man wants crosses from the flanks, a false nine likes the middle). Tap a position to change its role.</p>
+        ${ratings}${pitchHtml(lineup, null, null, 'role-pick', roles)}${rolesList(lineup, roles, 'role-pick')}`;
+    }
+    return tabs + style + `<h2>Formation</h2>
+      <div class="chips">${Object.keys(E.FORMATIONS).map((f) => `<button class="btn ${c.formation === f ? 'on' : ''}" data-a="formation" data-f="${f}">${f} ${famBar(E.familiarity(c, f))}</button>`).join('')}</div>
+      <p class="small muted" style="margin:0 4px 10px">Familiarity grows each match you play a formation and fades for the others. An unfamiliar formation costs up to 6% of your team's strength.</p>
+      ${ratings}${scoutCard(false)}
       <div class="row between"><p class="small muted" style="margin:4px">Drag a player onto another to swap them (hold a bench player briefly, then drag), or tap one and then the other.</p>
         <button class="btn" data-a="auto-pick">Auto pick</button></div>
-      ${pitchHtml(lineup, selIdx, null, 'xi')}
+      ${pitchHtml(lineup, selIdx, null, 'xi', roles)}
       <h2>Bench & reserves</h2>
       <div class="list">${bench.map((p) => `<div class="item tap ${selBench === p.id ? 'sel' : ''}" data-a="bench" data-id="${p.id}">
         ${posTag(p.pos)}<div class="ovr">${p.ovr}</div><div class="grow"><div class="name">${esc(p.name)}${wk(p)}</div>
         <div class="small muted">${p.age}y · morale ${p.morale}</div></div>
         ${p.injury ? `<span class="tag inj">INJ ${p.injury}w</span>` : ''}${bar(p.fitness)}</div>`).join('')}</div>`;
-  }
-  function strengthOf(c) {
-    // mirror the engine's strength calc for display
-    const tmp = E.createMatch({ home: c.id, away: c.id === 0 ? 1 : 0 });
-    const lu = tmp.lineups[0];
-    const avg = (slot) => {
-      const r = lu.filter((l) => l.slot === slot).map((l) => E.slotRating(E.player(l.pid), slot));
-      return r.length ? r.reduce((a, b) => a + b, 0) / r.length : 0;
-    };
-    const gk = avg('GK'), df = avg('DF'), mf = avg('MF'), fw = avg('FW');
-    return { att: Math.round(0.6 * fw + 0.4 * mf), mid: Math.round(0.8 * mf + 0.1 * df + 0.1 * fw), def: Math.round(0.6 * df + 0.4 * gk) };
   }
   function tacticTap(kind, val) {
     const c = E.userClub();
@@ -1179,18 +1214,22 @@
           ${[1, 2, 4].map((s) => `<button class="btn ${ui.matchSpeed === s ? 'on' : ''}" data-a="m-speed" data-s="${s}">${s}x</button>`).join('')}
           <button class="btn" data-a="m-skip">⏭ End</button></div>
         <div class="btns"><button class="btn" data-a="m-tactics">📋 Tactics &amp; subs · ${m.formations[me]} · 🔁 ${5 - m.subs[me]} left</button></div>`;
-    el.innerHTML = `<div class="inner">
-      <div class="scoreboard">
+    // update the parts separately: rebuilding the buttons every tick (50 ms at 4x) would swallow taps
+    if (!el.querySelector('.inner') || el._match !== m) {
+      el.innerHTML = '<div class="inner"><div class="scoreboard"></div><div class="feed"></div><div class="controls"></div></div>';
+      el._match = m;
+      ui.matchCtl = null; ui.matchFeedN = -1;
+    }
+    el.querySelector('.scoreboard').innerHTML = `
         <div class="clock">${m.done ? 'FT' : m.min + "'"}</div>
         <div class="fixture"><div class="side">${crest(h)}<b class="small">${esc(h.name)}</b></div>
           <div class="score">${m.score[0]} - ${m.score[1]}</div>
           <div class="side">${crest(a)}<b class="small">${esc(a.name)}</b></div></div>
         <div class="row between small muted" style="margin-top:8px"><span>${poss}%</span><span>Possession</span><span>${100 - poss}%</span></div>
         <div class="mbar"><i style="width:${poss}%;background:${h.color}"></i><i style="flex:1;background:${a.color}"></i></div>
-        <div class="row between small muted"><span>${m.shots[0]} (${m.onTarget[0]})</span><span>Shots (on target)</span><span>${m.shots[1]} (${m.onTarget[1]})</span></div>
-      </div>
-      <div class="feed">${feed}</div>
-      <div class="controls">${controls}</div></div>`;
+        <div class="row between small muted"><span>${m.shots[0]} (${m.onTarget[0]})</span><span>Shots (on target)</span><span>${m.shots[1]} (${m.onTarget[1]})</span></div>`;
+    if (ui.matchFeedN !== m.events.length) { el.querySelector('.feed').innerHTML = feed; ui.matchFeedN = m.events.length; }
+    if (ui.matchCtl !== controls) { el.querySelector('.controls').innerHTML = controls; ui.matchCtl = controls; }
   }
   function matchTacticsModal() {
     const m = ui.match;
@@ -1214,11 +1253,12 @@
         ${selP && left ? '<span class="tag xi">ON</span>' : ''}</div>`).join('') || '<div class="news muted">No substitutes available.</div>'}</div>
       <h2>Formation</h2>
       <div class="chips">${Object.keys(E.FORMATIONS).map((f) => `<button class="btn ${m.formations[s] === f ? 'on' : ''}" data-a="m-form" data-f="${f}">${f}</button>`).join('')}</div>
-      <p class="small muted" style="margin:0 4px 8px">Changing formation moves the players on the pitch into their best slots.</p>
+      <p class="small muted" style="margin:0 4px 8px">Changing formation moves the players on the pitch into their best slots and resets their roles. Familiarity: ${famBar(E.familiarity(E.userClub(), m.formations[s]))}</p>
       <h2>Mentality</h2>
       <div class="btns" style="margin-bottom:4px">${Object.keys(E.MENTALITY).map((k) => `<button class="btn ${m.ments[s] === k ? 'on' : ''}" data-a="m-instr" data-k="mentality" data-v="${k}">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div>
-      ${instrRows(m.instr[s].pressing, m.instr[s].tempo, 'm-instr')}
-      <button class="btn primary block" data-a="m-tactics-done">▶ Resume the match</button>`);
+      ${instrRows(m.instr[s], 'm-instr')}
+      <h2>Player roles</h2>${rolesList(m.lineups[s], [], 'm-role-pick')}
+      <button class="btn primary block" style="margin-top:10px" data-a="m-tactics-done">▶ Resume the match</button>`);
   }
   function finishMatch() {
     clearInterval(ui.matchTimer);
@@ -1386,9 +1426,19 @@
       case 'player': playerModal(+d.id); break;
       case 'close': closeModal(); if (ui.match) { ui.matchSel = null; renderMatch(); } break;
       case 'close-render': closeModal(); ui.tab = 'home'; ui.leagueDiv = null; render(); break;
-      case 'formation': {
-        const c = E.userClub(); c.formation = d.f; c.lineup = E.autoLineup(c.id); ui.tacticSel = null; render(); break;
+      case 'formation': { E.setFormation(E.userClub().id, d.f); ui.tacticSel = null; save(); render(); break; }
+      case 'tac-view': ui.tacView = d.v; ui.tacticSel = null; render(); break;
+      case 'preset': E.applyPreset(E.userClub().id, d.p); save(); toast(`${E.PRESETS[d.p].label} applied.`); render(); break;
+      case 'role-pick': {
+        const c = E.userClub(), i = +d.i, l = E.validateLineup(c.id)[i];
+        roleModal(l.slot, E.rolesOf(c)[i], E.player(l.pid).name, i, 'set-role', 'close'); break;
       }
+      case 'set-role': E.setRole(E.userClub().id, +d.i, d.r); save(); closeModal(); render(); break;
+      case 'm-role-pick': {
+        const m = ui.match, s = m.sides.indexOf(G().userClub), l = m.lineups[s][+d.i];
+        roleModal(l.slot, l.role, E.player(l.pid).name, +d.i, 'm-set-role', 'm-subs'); break;
+      }
+      case 'm-set-role': { const m = ui.match; E.setMatchRole(m, m.sides.indexOf(G().userClub), +d.i, d.r); matchTacticsModal(); break; }
       case 'mentality': E.userClub().mentality = d.m; render(); break;
       case 'auto-pick': { const c = E.userClub(); c.lineup = E.autoLineup(c.id); ui.tacticSel = null; render(); break; }
       case 'xi': tacticTap('xi', +d.i); break;

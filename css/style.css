@@ -289,3 +289,11 @@ main.enter { animation: tabIn .22s ease-out; }
 .drop-hover.slot .shirt { outline: 3px dashed var(--accent); outline-offset: 3px; transform: scale(1.18); }
 .drop-hover.item { background: #24452f; box-shadow: inset 0 0 0 2px var(--accent); }
 body.dragging, body.dragging * { cursor: grabbing !important; }
+
+/* tactics: role badges, familiarity, scouting */
+.slot .shirt { position: relative; }
+.slot .rl { position: absolute; top: -7px; right: -14px; font-size: 9px; font-weight: 800; line-height: 1; padding: 3px 4px; border-radius: 6px;
+  background: #0d1a12; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent); }
+.fam { font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 6px; margin-left: 3px; }
+.fam.hi { background: #1f4d30; color: #7ef0a8; } .fam.mid { background: #4d441f; color: #f0d77e; } .fam.lo { background: #4d1f1f; color: #f08e7e; }
+.card.scout { border-left: 3px solid var(--accent); }

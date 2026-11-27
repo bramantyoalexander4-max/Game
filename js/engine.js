@@ -2,7 +2,7 @@
 (function (root) {
   'use strict';
 
-  const SAVE_VERSION = 10;
+  const SAVE_VERSION = 11;
   let G = null; // current game state
 
   // ---------- random ----------
@@ -89,6 +89,96 @@
     normal: { att: 1, def: 1, chances: 1, label: 'Normal' },
     fast: { att: 1.03, def: 0.98, chances: 1.12, label: 'Direct' },
   };
+  const WIDTH = {
+    narrow: { att: 0.98, mid: 1.02, def: 1.02, label: 'Narrow' },
+    normal: { label: 'Normal' },
+    wide: { att: 1.03, def: 0.98, label: 'Wide' },
+  };
+  const LINE = {
+    deep: { mid: 0.97, def: 1.04, label: 'Deep' },
+    normal: { label: 'Normal' },
+    high: { mid: 1.04, def: 0.98, label: 'High' },
+  };
+  const FOCUS = {
+    middle: { label: 'Middle' },
+    mixed: { label: 'Mixed' },
+    flanks: { label: 'Flanks' },
+  };
+  const COUNTER = {
+    off: { label: 'Off' },
+    on: { att: 0.97, mid: 0.96, def: 1.02, label: 'Counter-attack' },
+  };
+  // every team instruction, with its default
+  const INSTRUCTIONS = {
+    pressing: { table: PRESSING, def: 'normal', name: 'Pressing' },
+    tempo: { table: TEMPO, def: 'normal', name: 'Tempo' },
+    width: { table: WIDTH, def: 'normal', name: 'Width' },
+    line: { table: LINE, def: 'normal', name: 'Defensive line' },
+    focus: { table: FOCUS, def: 'mixed', name: 'Attack focus' },
+    counter: { table: COUNTER, def: 'off', name: 'Transition' },
+  };
+  const mult = (t, k) => (t && t[k] !== undefined ? t[k] : 1);
+  // ready-made tactical styles: a preset sets the mentality and every instruction
+  const PRESETS = {
+    balanced: { label: 'Balanced', mentality: 'balanced', pressing: 'normal', tempo: 'normal', width: 'normal', line: 'normal', focus: 'mixed', counter: 'off' },
+    gegenpress: { label: 'Gegenpress', mentality: 'attacking', pressing: 'high', tempo: 'fast', width: 'normal', line: 'high', focus: 'mixed', counter: 'off' },
+    tikitaka: { label: 'Tiki-taka', mentality: 'balanced', pressing: 'high', tempo: 'slow', width: 'narrow', line: 'high', focus: 'middle', counter: 'off' },
+    wingplay: { label: 'Wing play', mentality: 'balanced', pressing: 'normal', tempo: 'normal', width: 'wide', line: 'normal', focus: 'flanks', counter: 'off' },
+    counter: { label: 'Counter-attack', mentality: 'defensive', pressing: 'normal', tempo: 'fast', width: 'normal', line: 'deep', focus: 'mixed', counter: 'on' },
+    bus: { label: 'Park the bus', mentality: 'defensive', pressing: 'low', tempo: 'slow', width: 'narrow', line: 'deep', focus: 'mixed', counter: 'on' },
+  };
+  // player roles: per player, percentage points added to the team's attack / midfield / defence,
+  // plus how often he shoots or assists and how fast he tires
+  const ROLES = {
+    GK: {
+      gk: { label: 'Goalkeeper', short: 'GK', desc: 'Stays on his line and keeps it simple.' },
+      sk: { label: 'Sweeper keeper', short: 'SK', mid: 0.6, desc: 'Sweeps up behind a high line and starts attacks. Halves the threat of balls over a high line; shakier behind a deep line.' },
+    },
+    DF: {
+      cb: { label: 'Centre-back', short: 'CB', def: 1.2, att: -0.3, desc: 'Stays back and defends the box.' },
+      fb: { label: 'Full-back', short: 'FB', desc: 'Defends first, supports the attack when it is safe.' },
+      wb: { label: 'Wing-back', short: 'WB', att: 1.2, def: -1, shot: 1.5, fatigue: 1.2, desc: 'Bombs forward down the flank. Better with a wide shape; tires faster and leaves space behind.' },
+      bpd: { label: 'Ball-playing defender', short: 'BPD', mid: 1, def: -0.4, desc: 'Brings the ball out from the back. Risky against a high press.' },
+    },
+    MF: {
+      dm: { label: 'Holding midfielder', short: 'DM', def: 1.4, att: -0.6, shot: 0.6, desc: 'Shields the defence. Extra solid when you counter-attack.' },
+      b2b: { label: 'Box-to-box', short: 'BB', mid: 0.8, att: 0.4, def: 0.3, fatigue: 1.25, desc: 'Covers every blade of grass at both ends, but tires faster.' },
+      pm: { label: 'Playmaker', short: 'PM', mid: 1.4, att: 0.6, def: -0.6, assist: 2, desc: 'Dictates play and creates chances. Thrives with patient tempo.' },
+      wi: { label: 'Winger', short: 'W', att: 1.1, def: -0.5, shot: 1.3, assist: 1.4, desc: 'Takes on full-backs and crosses. Needs a wide shape; wasted in a narrow one.' },
+    },
+    FW: {
+      tm: { label: 'Target man', short: 'TM', att: 0.4, shot: 1.2, desc: 'Wins headers and holds the ball up. Deadly when you attack down the flanks.' },
+      po: { label: 'Poacher', short: 'P', att: 0.6, mid: -0.5, shot: 1.6, finish: 1.06, desc: 'Lives in the box and finishes more of his chances. Does little else.' },
+      pf: { label: 'Pressing forward', short: 'PF', mid: 0.5, oppAtt: -1, shot: 0.9, fatigue: 1.3, desc: 'Harries defenders from the front, more so in a high press. Tires faster.' },
+      f9: { label: 'False nine', short: 'F9', mid: 1.2, att: -0.2, shot: 0.7, assist: 1.8, desc: 'Drops deep to link play and create. Best when attacking through the middle.' },
+    },
+  };
+  const DEFAULT_ROLES = {
+    DF: { 3: ['cb', 'cb', 'cb'], 4: ['fb', 'cb', 'cb', 'fb'], 5: ['wb', 'cb', 'cb', 'cb', 'wb'] },
+    MF: { 3: ['b2b', 'dm', 'pm'], 4: ['wi', 'b2b', 'dm', 'wi'], 5: ['wi', 'b2b', 'dm', 'pm', 'wi'] },
+    FW: { 1: ['tm'], 2: ['tm', 'po'], 3: ['pf', 'po', 'pf'] },
+  };
+  // how one side's style plays against the other's: each rule scales the attacking side's attack
+  const MATCHUPS = [
+    { when: (me, op) => me.focus === 'flanks' && op.width === 'narrow', mul: 1.06, text: 'Their narrow shape leaves the flanks open for attacks down the wings.' },
+    { when: (me, op) => me.focus === 'flanks' && op.width === 'wide', mul: 0.97, text: 'They defend wide, which blunts attacks down the flanks.' },
+    { when: (me, op) => me.focus === 'middle' && op.width === 'narrow', mul: 0.95, text: 'They crowd the middle, so playing through the centre is hard.' },
+    { when: (me, op) => me.focus === 'middle' && op.width === 'wide', mul: 1.05, text: 'Their wide shape leaves gaps in the middle to play through.' },
+    { when: (me, op) => op.line === 'high' && me.tempo === 'fast', mul: 1.05, overLine: true, text: 'Direct balls over their high line create chances.' },
+    { when: (me, op) => op.line === 'high' && me.counter === 'on', mul: 1.06, overLine: true, text: 'Counter-attacks exploit the space behind their high line.' },
+    { when: (me, op) => op.line === 'high' && me.tempo === 'slow', mul: 0.97, text: 'Their high line squeezes the space for slow build-up.' },
+    { when: (me, op) => op.line === 'deep' && me.tempo === 'fast', mul: 0.96, text: 'They sit deep, so there is no space in behind for direct balls.' },
+    { when: (me, op) => op.line === 'deep' && me.counter === 'on', mul: 0.95, text: 'They sit deep, leaving little room to counter into.' },
+    { when: (me, op) => op.line === 'deep' && me.tempo === 'slow', mul: 1.03, text: 'Patient build-up can pick apart their deep block.' },
+    { when: (me, op) => op.mentality === 'attacking' && me.counter === 'on', mul: 1.05, text: 'They commit players forward, leaving space to counter.' },
+    { when: (me, op) => op.pressing === 'high' && me.tempo === 'fast', mul: 1.04, text: 'Direct passing bypasses their high press.' },
+    { when: (me, op) => op.pressing === 'high' && me.tempo === 'slow', mul: 0.96, text: 'Their high press punishes slow build-up.' },
+    { when: (me, op) => op.pressing === 'high' && me.bpd, mul: 0.98, text: 'Their press hunts ball-playing defenders for mistakes.' },
+  ];
+  function matchupRules(me, op) {
+    return MATCHUPS.filter((r) => r.when(me, op)).map((r) => ({ ...r, mul: r.overLine && op.sk ? 1 + (r.mul - 1) / 2 : r.mul }));
+  }
+  const matchupMul = (me, op) => matchupRules(me, op).reduce((a, r) => a * r.mul, 1);
   const INTENSITY = {
     light: { recover: 24, growth: 0.7, injury: 0.5 },
     normal: { recover: 18, growth: 1, injury: 1 },
@@ -334,6 +424,7 @@
         formation: pick(Object.keys(FORMATIONS)), mentality: 'balanced',
         squad: [], lineup: [], table: blankTable(),
       });
+      rollStyle(G.clubs[G.clubs.length - 1]);
     });
     G.clubs.forEach((c) => {
       const src = ds.clubs[c.id];
@@ -387,6 +478,7 @@
     if (ds.continental) {
       G.clNext = ds.continental.initial.map((n) => G.clubs.findIndex((c) => c.name === n)).filter((id) => id >= 0);
     }
+    applyPreset(G.userClub, 'balanced');
     scheduleSeason();
     if (ds.autoEconomy) {
       // real wage bills vary wildly; scale each club's income so it starts roughly break-even
@@ -703,6 +795,83 @@
     const f = FORMATIONS[formation];
     return ['GK', ...Array(f.DF).fill('DF'), ...Array(f.MF).fill('MF'), ...Array(f.FW).fill('FW')];
   }
+  function defaultRoles(formation) {
+    const f = FORMATIONS[formation];
+    return ['gk', ...DEFAULT_ROLES.DF[f.DF], ...DEFAULT_ROLES.MF[f.MF], ...DEFAULT_ROLES.FW[f.FW]];
+  }
+  const validRole = (slot, role) => !!(ROLES[slot] && ROLES[slot][role]);
+  // the roles for each position of a club's formation (stored per position, not per player)
+  function rolesOf(c) {
+    const slots = slotsFor(c.formation);
+    const def = defaultRoles(c.formation);
+    return slots.map((slot, i) => (c.roles && validRole(slot, c.roles[i]) ? c.roles[i] : def[i]));
+  }
+  function setRole(cid, i, role) {
+    const c = club(cid), slot = slotsFor(c.formation)[i];
+    if (!validRole(slot, role)) return false;
+    c.roles = rolesOf(c); c.roles[i] = role;
+    return true;
+  }
+  // tactical familiarity: kept for the user's team only (AI teams know their own system)
+  function familiarity(c, f = c.formation) {
+    if (!c.fam) return f === c.formation ? 100 : 60;
+    return c.fam[f] !== undefined ? c.fam[f] : 50;
+  }
+  function setFormation(cid, f) {
+    const c = club(cid);
+    if (!FORMATIONS[f]) return false;
+    if (!c.fam) c.fam = Object.fromEntries(Object.keys(FORMATIONS).map((k) => [k, familiarity(c, k)]));
+    c.formation = f; c.roles = null; c.lineup = autoLineup(cid);
+    return true;
+  }
+  function trainFamiliarity(c) {
+    if (!c.fam) c.fam = Object.fromEntries(Object.keys(FORMATIONS).map((k) => [k, familiarity(c, k)]));
+    Object.keys(FORMATIONS).forEach((k) => { c.fam[k] = k === c.formation ? Math.min(100, c.fam[k] + 10) : Math.max(40, c.fam[k] - 2); });
+  }
+  const instrOf = (c) => Object.fromEntries(Object.entries(INSTRUCTIONS).map(([k, d]) => [k, d.table[c[k]] ? c[k] : d.def]));
+  function applyPreset(cid, key) {
+    const c = club(cid), pr = PRESETS[key];
+    if (!pr) return false;
+    Object.keys(INSTRUCTIONS).forEach((k) => { c[k] = pr[k]; });
+    c.mentality = pr.mentality;
+    return true;
+  }
+  // which preset (if any) a set of instructions matches
+  function styleName(ment, ins) {
+    const k = Object.keys(PRESETS).find((p) => Object.keys(INSTRUCTIONS).every((x) => PRESETS[p][x] === ins[x]));
+    return k ? PRESETS[k].label : 'Custom';
+  }
+  // AI clubs get a style that suits their standing
+  function rollStyle(c, rep = c.rep) {
+    const strong = rep >= 75, weak = rep < 60;
+    const pool = strong ? ['balanced', 'gegenpress', 'tikitaka', 'wingplay', 'gegenpress', 'balanced']
+      : weak ? ['balanced', 'counter', 'bus', 'wingplay', 'counter'] : ['balanced', 'wingplay', 'counter', 'gegenpress', 'balanced', 'tikitaka'];
+    const pr = PRESETS[pick(pool)];
+    Object.keys(INSTRUCTIONS).forEach((k) => { c[k] = pr[k]; });
+    // AI teams keep a balanced mentality before kick-off and adapt during the match
+    c.mentality = pr.mentality === 'attacking' ? 'balanced' : pr.mentality;
+  }
+  function roleEffects(lineup, ins) {
+    const r = { att: 0, mid: 0, def: 0, oppAtt: 0 };
+    lineup.forEach((l, i) => {
+      const role = l.role || (ins.roles && ins.roles[i]) || 'x';
+      const R = ROLES[l.slot][role] || {};
+      ['att', 'mid', 'def', 'oppAtt'].forEach((k) => { r[k] += R[k] || 0; });
+      // synergies with the team instructions
+      if (role === 'wi') r.att += ins.width === 'wide' ? 0.6 : ins.width === 'narrow' ? -1 : 0;
+      if (role === 'wb' && ins.width === 'wide') r.att += 0.5;
+      if (role === 'tm') r.att += ins.focus === 'flanks' ? 1.2 : ins.focus === 'middle' ? -0.4 : 0;
+      if (role === 'f9' && ins.focus === 'middle') r.att += 1;
+      if (role === 'pm' && ins.tempo === 'slow') r.mid += 0.6;
+      if (role === 'sk' && ins.line === 'deep') r.def -= 0.8;
+      if (role === 'pf' && ins.pressing === 'high') r.oppAtt -= 0.8;
+      if (role === 'dm' && ins.counter === 'on') r.def += 0.5;
+    });
+    ['att', 'mid', 'def'].forEach((k) => { r[k] = clamp(r[k], -10, 10); });
+    r.oppAtt = clamp(r.oppAtt, -6, 0);
+    return r;
+  }
+  const roleOf = (l) => (ROLES[l.slot][l.role] || {});
   function autoLineup(cid) {
     const c = club(cid);
     const avail = squadOf(cid).filter((p) => p.injury === 0);
@@ -770,14 +939,60 @@
     let def = (0.6 * avg(by.DF) + 0.4 * gk) * (1 + 0.035 * (n.DF - 4) + 0.01 * (n.MF - 4)) * m.def;
     const short = 1 - 0.07 * Math.max(0, 11 - lineup.length); // red cards
     const h = home ? 1.03 : 1;
-    const pr = PRESSING[(instr && instr.pressing) || 'normal'], tp = TEMPO[(instr && instr.tempo) || 'normal'];
-    att *= tp.att; mid *= pr.mid; def *= pr.def * tp.def;
-    return { att: att * short * h, mid: mid * short * h, def: def * short * h };
+    const I = instr || {};
+    const pr = PRESSING[I.pressing] || PRESSING.normal, tp = TEMPO[I.tempo] || TEMPO.normal;
+    const wd = WIDTH[I.width], ln = LINE[I.line], ct = COUNTER[I.counter];
+    att *= tp.att * mult(wd, 'att') * mult(ct, 'att');
+    mid *= pr.mid * mult(wd, 'mid') * mult(ln, 'mid') * mult(ct, 'mid');
+    def *= pr.def * tp.def * mult(wd, 'def') * mult(ln, 'def') * mult(ct, 'def');
+    const r = roleEffects(lineup, I);
+    att *= 1 + r.att / 100; mid *= 1 + r.mid / 100; def *= 1 + r.def / 100;
+    // a formation the players don't know well costs up to 6%
+    const fam = I.fam === undefined ? 1 : 0.94 + 0.06 * I.fam / 100;
+    const k = short * h * fam;
+    return { att: att * k, mid: mid * k, def: def * k, oppAtt: 1 + r.oppAtt / 100 };
   }
   function clubStrength(cid) {
     const c = club(cid);
-    const s = strength(validateLineup(cid), c.mentality, null, false, { pressing: c.pressing, tempo: c.tempo });
+    const s = teamRatings(cid);
     return Math.round((s.att + s.mid + s.def) / 3);
+  }
+  // attack / midfield / defence ratings with the club's current tactics
+  function teamRatings(cid) {
+    const c = club(cid);
+    const s = strength(validateLineup(cid), c.mentality, null, false, { ...instrOf(c), roles: rolesOf(c), fam: familiarity(c) });
+    return { att: Math.round(s.att), mid: Math.round(s.mid), def: Math.round(s.def) };
+  }
+  // the style each side brings to a match, for the matchup rules
+  function styleOfClub(c, lineupRoles) {
+    return { ...instrOf(c), mentality: c.mentality, sk: lineupRoles[0] === 'sk', bpd: lineupRoles.includes('bpd') };
+  }
+  function styleInMatch(m, s) {
+    return { ...m.instr[s], mentality: m.ments[s], sk: m.lineups[s].some((l) => l.role === 'sk'), bpd: m.lineups[s].some((l) => l.role === 'bpd') };
+  }
+  // the assistant's pre-match analysis: what works for and against you, and ideas to try
+  function matchupReport(myId, oppId) {
+    const me = club(myId), op = club(oppId);
+    const mine = styleOfClub(me, rolesOf(me)), theirs = styleOfClub(op, rolesOf(op));
+    const forYou = matchupRules(mine, theirs).filter((r) => r.mul > 1).map((r) => r.text);
+    const against = [...matchupRules(mine, theirs).filter((r) => r.mul < 1).map((r) => r.text),
+      ...matchupRules(theirs, mine).filter((r) => r.mul > 1).map((r) => r.text.replace(/\btheir\b/gi, (w) => (w[0] === 'T' ? 'Your' : 'your')).replace(/\bThey\b/g, 'You').replace(/\bthey\b/g, 'you'))];
+    // ideas: rules that would work against this opponent if you changed one instruction
+    const ideas = [];
+    Object.entries(INSTRUCTIONS).forEach(([k, d]) => Object.keys(d.table).forEach((v) => {
+      if (mine[k] === v) return;
+      const alt = { ...mine, [k]: v };
+      const gain = matchupMul(alt, theirs) * matchupMul(theirs, { ...alt }) ** -1 / (matchupMul(mine, theirs) / matchupMul(theirs, mine));
+      if (gain > 1.035) ideas.push({ gain, key: k, text: `${d.name}: ${d.table[v].label}` });
+    }));
+    ideas.sort((a, b) => b.gain - a.gain);
+    const seen = new Set(), best = ideas.filter((x) => !seen.has(x.key) && seen.add(x.key));
+    return { style: styleName(op.mentality, instrOf(op)), formation: op.formation, forYou, against, ideas: best.slice(0, 3).map((x) => x.text) };
+  }
+  // the next unplayed fixture for the user's team
+  function nextUserFixture() {
+    for (let w = G.week; w < totalWeeks(); w++) { const f = userFixture(w); if (f && !f.played) return f; }
+    return null;
   }
 
   // ---------- match simulation ----------
@@ -785,10 +1000,10 @@
     const sides = [fx.home, fx.away];
     const m = {
       fx, sides, min: 0, score: [0, 0], events: [], done: false,
-      lineups: sides.map((cid) => validateLineup(cid).map((l) => ({ ...l }))),
+      lineups: sides.map((cid) => { const roles = rolesOf(club(cid)); return validateLineup(cid).map((l, i) => ({ ...l, role: roles[i] })); }),
       fit: {}, subs: [0, 0], usedSubs: [[], []], yellows: {}, injuries: [],
       ments: sides.map((cid) => club(cid).mentality),
-      instr: sides.map((cid) => ({ pressing: club(cid).pressing || 'normal', tempo: club(cid).tempo || 'normal' })),
+      instr: sides.map((cid) => ({ ...instrOf(club(cid)), fam: familiarity(club(cid)) })),
       formations: sides.map((cid) => club(cid).formation),
       shots: [0, 0], onTarget: [0, 0], possTicks: [0, 0], scorers: [], assists: [], appeared: new Set(),
     };
@@ -809,8 +1024,8 @@
     const idx = m.lineups[s].findIndex((l) => l.pid === outPid);
     if (idx < 0) return false;
     if (!benchOf(m, s).some((p) => p.id === inPid)) return false;
-    const slot = m.lineups[s][idx].slot;
-    m.lineups[s][idx] = { pid: inPid, slot };
+    const { slot, role } = m.lineups[s][idx];
+    m.lineups[s][idx] = { pid: inPid, slot, role };
     m.subs[s]++;
     m.dirty = true;
     m.usedSubs[s].push(outPid, inPid);
@@ -825,8 +1040,8 @@
   function aiInMatchTactics(m, s) {
     if (m.min !== 60 && m.min !== 75) return;
     const diff = m.score[s] - m.score[1 - s];
-    if (diff < 0) { m.ments[s] = 'attacking'; m.instr[s] = { pressing: 'high', tempo: 'fast' }; }
-    else if (diff >= 2 || (diff === 1 && m.min === 75)) { m.ments[s] = 'defensive'; m.instr[s] = { pressing: 'low', tempo: 'slow' }; }
+    if (diff < 0) { m.ments[s] = 'attacking'; Object.assign(m.instr[s], { pressing: 'high', tempo: 'fast', line: 'high', width: 'wide', counter: 'off' }); }
+    else if (diff >= 2 || (diff === 1 && m.min === 75)) { m.ments[s] = 'defensive'; Object.assign(m.instr[s], { pressing: 'low', tempo: 'slow', line: 'deep', width: 'narrow', counter: 'on' }); }
   }
   // move the players on the pitch into a new formation, each to the slot that suits him best
   function setMatchFormation(m, s, formation) {
@@ -836,13 +1051,16 @@
     const gk = onPitch.find((p) => m.lineups[s].find((l) => l.pid === p.id).slot === 'GK');
     const lineup = [];
     const used = new Set();
-    if (gk && slots[0] === 'GK') { lineup.push({ pid: gk.id, slot: 'GK' }); used.add(gk.id); }
+    const roles = defaultRoles(formation);
+    const gkRole = (m.lineups[s].find((l) => l.slot === 'GK') || {}).role || 'gk';
+    if (gk && slots[0] === 'GK') { lineup.push({ pid: gk.id, slot: 'GK', role: gkRole }); used.add(gk.id); }
     slots.slice(lineup.length).forEach((slot) => {
       const best = onPitch.filter((p) => !used.has(p.id)).sort((a, b) => slotRating(b, slot, m.fit[b.id]) - slotRating(a, slot, m.fit[a.id]))[0];
-      if (best) { used.add(best.id); lineup.push({ pid: best.id, slot }); }
+      if (best) { used.add(best.id); lineup.push({ pid: best.id, slot, role: roles[lineup.length] }); }
     });
     m.lineups[s] = lineup;
     m.formations[s] = formation;
+    m.instr[s].fam = familiarity(club(m.sides[s]), formation);
     m.dirty = true;
     ev(m, s, 'info', `📋 ${club(m.sides[s]).short} switch to ${formation}.`);
     return true;
@@ -852,18 +1070,24 @@
     const lu = m.lineups[s];
     if (i === j || !lu[i] || !lu[j]) return false;
     const a = lu[i].pid, b = lu[j].pid;
-    lu[i] = { pid: b, slot: lu[i].slot };
-    lu[j] = { pid: a, slot: lu[j].slot };
+    lu[i] = { ...lu[i], pid: b };
+    lu[j] = { ...lu[j], pid: a };
     m.dirty = true;
     ev(m, s, 'info', `🔀 ${pname(a)} moves to ${lu[j].slot}, ${pname(b)} to ${lu[i].slot}.`);
     return true;
   }
   function setMatchInstruction(m, s, key, value) {
     if (key === 'mentality' && MENTALITY[value]) m.ments[s] = value;
-    else if (key === 'pressing' && PRESSING[value]) m.instr[s].pressing = value;
-    else if (key === 'tempo' && TEMPO[value]) m.instr[s].tempo = value;
+    else if (INSTRUCTIONS[key] && INSTRUCTIONS[key].table[value]) m.instr[s][key] = value;
     else return false;
     m.dirty = true;
+    return true;
+  }
+  function setMatchRole(m, s, i, role) {
+    const l = m.lineups[s][i];
+    if (!l || !validRole(l.slot, role)) return false;
+    l.role = role; m.dirty = true;
+    ev(m, s, 'info', `🎯 ${pname(l.pid)} now plays as ${ROLES[l.slot][role].label.toLowerCase()}.`);
     return true;
   }
   function aiSubs(m, s) {
@@ -883,8 +1107,10 @@
     const key = m.ments.join() + JSON.stringify(m.instr || []);
     if (!m.st || m.dirty || m.min % 10 === 1 || m.stMents !== key) {
       m.st = m.lineups.map((lu, s) => strength(lu, m.ments[s], m.fit, s === 0, m.instr && m.instr[s]));
-      // a high press also blunts the other side's attack
-      if (m.instr) [0, 1].forEach((s) => { m.st[1 - s].att *= PRESSING[m.instr[s].pressing].oppAtt; });
+      // how the two styles match up, and pressing (team and forwards) blunting the other side's attack
+      const styles = [0, 1].map((s) => styleInMatch(m, s));
+      const mu = [0, 1].map((s) => matchupMul(styles[s], styles[1 - s]));
+      [0, 1].forEach((s) => { m.st[s].att *= mu[s] * PRESSING[m.instr[1 - s].pressing].oppAtt * m.st[1 - s].oppAtt; });
       m.stMents = key; m.dirty = false;
     }
     const st = m.st;
@@ -898,15 +1124,15 @@
       const s = rand() < w0 / (w0 + w1) ? 0 : 1, o = 1 - s;
       const ratio = st[s].att / st[o].def;
       m.shots[s]++;
-      const goalP = clamp(0.175 * Math.pow(ratio, 2.4), 0.04, 0.5);
       const outfield = m.lineups[s].filter((l) => l.slot !== 'GK');
-      const shooter = weighted(outfield, (l) => ({ FW: 5, MF: 2.3, DF: 0.6 }[l.slot]) * Math.pow(player(l.pid).ovr / 60, 3));
+      const shooter = weighted(outfield, (l) => ({ FW: 5, MF: 2.3, DF: 0.6 }[l.slot]) * mult(roleOf(l), 'shot') * Math.pow(player(l.pid).ovr / 60, 3));
+      const goalP = clamp(0.175 * Math.pow(ratio, 2.4) * mult(roleOf(shooter), 'finish'), 0.04, 0.5);
       const r = rand();
       if (r < goalP) {
         m.onTarget[s]++;
         m.score[s]++;
         const others = outfield.filter((l) => l.pid !== shooter.pid);
-        const assist = rand() < 0.75 ? weighted(others, (l) => ({ FW: 2.5, MF: 4, DF: 1 }[l.slot])) : null;
+        const assist = rand() < 0.75 ? weighted(others, (l) => ({ FW: 2.5, MF: 4, DF: 1 }[l.slot]) * mult(roleOf(l), 'assist')) : null;
         m.scorers.push({ side: s, pid: shooter.pid, min: m.min });
         if (assist) m.assists.push(assist.pid);
         ev(m, s, 'goal', `⚽ GOAL! ${club(m.sides[s]).short} — ${pname(shooter.pid)}${assist ? ' (assist ' + pname(assist.pid) + ')' : ''}. ${m.score[0]}-${m.score[1]}`);
@@ -952,7 +1178,7 @@
     if (m.min % 5 === 0) {
       m.lineups.forEach((lu, s) => {
         const f = m.instr ? PRESSING[m.instr[s].pressing].fatigue : 1;
-        for (const l of lu) m.fit[l.pid] = Math.max(20, m.fit[l.pid] - (l.slot === 'GK' ? 0.3 : 1) * f);
+        for (const l of lu) m.fit[l.pid] = Math.max(20, m.fit[l.pid] - (l.slot === 'GK' ? 0.3 : 1) * f * mult(roleOf(l), 'fatigue'));
       });
     }
     // AI substitutions (the user's side too when they choose to sim)
@@ -999,6 +1225,7 @@
 
   function applyResult(m) {
     const { fx } = m;
+    if (m.sides.includes(G.userClub)) trainFamiliarity(userClub());
     if (fx.comp === 'INT') { applyIntlResult(m); return; }
     fx.played = true; fx.hg = m.score[0]; fx.ag = m.score[1];
     // keep scorer names only for the user's own matches; storing them for every game bloats the save
@@ -1206,6 +1433,11 @@
       formation: '4-3-3', mentality: 'balanced', squad: [], lineup: [], table: blankTable(),
     }));
     withNatGroups(() => G.nations.forEach((n) => callUp(n)));
+    G.nations.forEach(rollNationStyle);
+  }
+  function rollNationStyle(n) {
+    const ovr = n.squad.map((id) => player(id)).filter(Boolean).map((p) => p.ovr).sort((a, b) => b - a).slice(0, 11);
+    rollStyle(n, ovr.length ? ovr.reduce((a, b) => a + b, 0) / ovr.length - 2 : 55);
   }
   // the national teams a user can pick before a game exists: nations with enough real players in the data
   function previewNations(datasetId) {
@@ -2096,7 +2328,7 @@
   function serialize() { return JSON.stringify(G); }
   function load(json) {
     const data = typeof json === 'string' ? JSON.parse(json) : json;
-    if (!data || ![2, 3, 4, 5, 6, 7, 8, SAVE_VERSION].includes(data.version)) throw new Error('Incompatible save');
+    if (!data || ![2, 3, 4, 5, 6, 7, 8, 9, 10, SAVE_VERSION].includes(data.version)) throw new Error('Incompatible save');
     G = data;
     if (G.version === 2) {
       // v2 saves had no contracts or academy
@@ -2162,13 +2394,21 @@
       // v9 sold legends for money and let them play internationally
       G.legendPoints = 0;
       Object.values(G.players).forEach((p) => { if (p.legend) (G.nations || []).forEach((n) => { n.squad = n.squad.filter((id) => id !== p.id); }); });
+      G.version = 10;
+    }
+    if (G.version === 10) {
+      // v10 had only pressing and tempo: other teams now get a playing style; yours keeps its settings
+      G.clubs.forEach((c) => { if (c.id !== G.userClub) rollStyle(c); });
+      (G.nations || []).forEach((n) => { if (n.id !== G.userClub) rollNationStyle(n); });
       G.version = SAVE_VERSION;
     }
     return G;
   }
 
   root.Engine = {
-    CLUBS, datasets, getDataset, FORMATIONS, MENTALITY, PRESSING, TEMPO, setMatchFormation, setMatchInstruction, swapMatchPositions, INTENSITY, POS_ORDER, MIN_SQUAD, MAX_SQUAD,
+    CLUBS, datasets, getDataset, FORMATIONS, MENTALITY, PRESSING, TEMPO, setMatchFormation, setMatchInstruction,
+    WIDTH, LINE, FOCUS, COUNTER, INSTRUCTIONS, PRESETS, ROLES, rolesOf, setRole, setMatchRole, familiarity, setFormation,
+    applyPreset, styleName, instrOf, teamRatings, matchupReport, nextUserFixture, defaultRoles, swapMatchPositions, INTENSITY, POS_ORDER, MIN_SQUAD, MAX_SQUAD,
     get state() { return G; },
     newGame, load, serialize,
     club, player, squadOf, userClub, totalWeeks, fixturesForWeek, userFixture,
