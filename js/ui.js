@@ -885,8 +885,7 @@
           <button class="btn ${ui.matchPaused ? 'on' : ''}" data-a="m-pause">${ui.matchPaused ? '▶ Resume' : '⏸ Pause'}</button>
           ${[1, 2, 4].map((s) => `<button class="btn ${ui.matchSpeed === s ? 'on' : ''}" data-a="m-speed" data-s="${s}">${s}x</button>`).join('')}
           <button class="btn" data-a="m-skip">⏭ End</button></div>
-        <div class="btns"><button class="btn" data-a="m-tactics">📋 Tactics · ${m.formations[me]} · ${m.ments[me][0].toUpperCase() + m.ments[me].slice(1, 3)}</button>
-          <button class="btn" data-a="m-subs">🔁 Subs (${5 - m.subs[me]})</button></div>`;
+        <div class="btns"><button class="btn" data-a="m-tactics">📋 Tactics &amp; subs · ${m.formations[me]} · 🔁 ${5 - m.subs[me]} left</button></div>`;
     el.innerHTML = `<div class="inner">
       <div class="scoreboard">
         <div class="clock">${m.done ? 'FT' : m.min + "'"}</div>
@@ -905,31 +904,28 @@
     const s = m.sides.indexOf(G().userClub);
     ui.matchPaused = true; clearInterval(ui.matchTimer); renderMatch();
     const score = `${m.score[s]}-${m.score[1 - s]}`;
-    openModal(`<div class="row between"><b>In-match tactics · ${m.min}' · ${score}</b><button class="btn" data-a="m-tactics-done">▶ Resume</button></div>
-      <p class="small muted">The match is paused. Changes take effect straight away; formation changes move the players on the pitch into their best slots.</p>
+    const sel = typeof ui.matchSwap === 'number' ? ui.matchSwap : null;
+    const selP = sel !== null && m.lineups[s][sel] ? E.player(m.lineups[s][sel].pid) : null;
+    const left = 5 - m.subs[s];
+    const bench = E.benchOf(m, s).sort((a, b) => E.POS_ORDER[a.pos] - E.POS_ORDER[b.pos] || b.ovr - a.ovr);
+    const hint = selP
+      ? `<b>${esc(selP.name)}</b> selected: tap another player on the pitch to swap positions${left ? ', or a substitute below to bring him off' : ''}.`
+      : 'Tap a player on the pitch, then another player to swap positions, or a substitute to bring him on.';
+    openModal(`<div class="row between"><b>Tactics &amp; subs · ${m.min}' · ${score}</b><button class="btn primary" data-a="m-tactics-done">▶ Resume</button></div>
+      <p class="small muted" style="margin:6px 0">The match is paused while this panel is open.</p>
+      <div class="wkcard small" style="margin:6px 0">${hint}</div>
+      ${pitchHtml(m.lineups[s], sel, m.fit, 'm-swap')}
+      <div class="row between"><h2 style="margin:6px 4px">Substitutes</h2><span class="small muted">🔁 ${left} of 5 left</span></div>
+      <div class="list">${bench.map((p) => `<div class="item tap ${!selP || !left ? '' : ''}" data-a="m-in" data-id="${p.id}">
+        ${posTag(p.pos)}<div class="ovr">${p.ovr}</div><div class="grow name">${esc(p.name)}</div>${bar(m.fit[p.id])}
+        ${selP && left ? '<span class="tag xi">ON</span>' : ''}</div>`).join('') || '<div class="news muted">No substitutes available.</div>'}</div>
       <h2>Formation</h2>
       <div class="chips">${Object.keys(E.FORMATIONS).map((f) => `<button class="btn ${m.formations[s] === f ? 'on' : ''}" data-a="m-form" data-f="${f}">${f}</button>`).join('')}</div>
+      <p class="small muted" style="margin:0 4px 8px">Changing formation moves the players on the pitch into their best slots.</p>
       <h2>Mentality</h2>
       <div class="btns" style="margin-bottom:4px">${Object.keys(E.MENTALITY).map((k) => `<button class="btn ${m.ments[s] === k ? 'on' : ''}" data-a="m-instr" data-k="mentality" data-v="${k}">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div>
       ${instrRows(m.instr[s].pressing, m.instr[s].tempo, 'm-instr')}
-      <div class="btns"><button class="btn" data-a="m-subs">🔁 Substitutions (${5 - m.subs[s]} left)</button></div>
-      <h2>On the pitch</h2>
-      <p class="small muted" style="margin:4px">Tap a player, then another, to swap their positions. A player shown with his own position in brackets is playing out of position.</p>
-      ${pitchHtml(m.lineups[s], typeof ui.matchSwap === 'number' ? ui.matchSwap : null, m.fit, 'm-swap')}`);
-  }
-  function subsModal() {
-    const m = ui.match;
-    const s = m.sides.indexOf(G().userClub);
-    ui.matchPaused = true; clearInterval(ui.matchTimer); renderMatch();
-    const lu = m.lineups[s];
-    const bench = E.benchOf(m, s).sort((a, b) => E.POS_ORDER[a.pos] - E.POS_ORDER[b.pos] || b.ovr - a.ovr);
-    const selOut = ui.matchSel;
-    openModal(`<div class="row between"><b>Substitutions (${5 - m.subs[s]} left)</b><button class="btn" data-a="close">Done</button></div>
-      <p class="small muted">Tap a player on the pitch, then a substitute.</p>
-      <div class="list">${lu.map((l) => { const p = E.player(l.pid); return `<div class="item tap ${selOut === p.id ? 'sel' : ''}" data-a="m-out" data-id="${p.id}">
-        <span class="pos ${l.slot}">${l.slot}</span><div class="ovr">${p.ovr}</div><div class="grow name">${esc(p.name)}${p.pos !== l.slot ? ` <span class="muted small">(${p.pos})</span>` : ''}${m.yellows[p.id] ? ' 🟨' : ''}</div>${bar(m.fit[p.id])}</div>`; }).join('')}</div>
-      <b class="small muted">Bench</b>
-      <div class="list">${bench.map((p) => `<div class="item tap" data-a="m-in" data-id="${p.id}">${posTag(p.pos)}<div class="ovr">${p.ovr}</div><div class="grow name">${esc(p.name)}</div>${bar(m.fit[p.id])}</div>`).join('') || '<div class="news muted">No substitutes available.</div>'}</div>`);
+      <button class="btn primary block" data-a="m-tactics-done">▶ Resume the match</button>`);
   }
   function finishMatch() {
     clearInterval(ui.matchTimer);
@@ -1175,14 +1171,14 @@
       case 'm-instr': { const m = ui.match; E.setMatchInstruction(m, m.sides.indexOf(G().userClub), d.k, d.v); matchTacticsModal(); break; }
       case 'instr': { E.userClub()[d.k] = d.v; save(); render(); break; }
       case 'noop': break;
-      case 'm-subs': ui.matchSel = null; subsModal(); break;
-      case 'm-out': ui.matchSel = +d.id; subsModal(); break;
+      case 'm-subs': ui.matchSwap = null; matchTacticsModal(); break;
       case 'm-in': {
         const m = ui.match, s = m.sides.indexOf(G().userClub);
-        if (ui.matchSel === null) { toast('First tap the player to take off.'); break; }
+        const out = typeof ui.matchSwap === 'number' && m.lineups[s][ui.matchSwap] ? m.lineups[s][ui.matchSwap].pid : null;
+        if (out === null) { toast('First tap the player on the pitch to take off.'); break; }
         if (m.subs[s] >= 5) { toast('No substitutions left.'); break; }
-        E.makeSub(m, s, ui.matchSel, +d.id);
-        ui.matchSel = null; subsModal(); break;
+        E.makeSub(m, s, out, +d.id);
+        ui.matchSwap = null; matchTacticsModal(); break;
       }
       case 'match-done': finishMatch(); break;
       case 'next-week': nextWeek(); break;

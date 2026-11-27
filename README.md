@@ -48,7 +48,7 @@ Open `index.html` in a browser, or serve the folder (for example `python3 -m htt
 ## Features
 
 - **Live match engine:** minute-by-minute commentary with possession and shots. You can pause, change speed, switch mentality and make up to 5 substitutions mid-match. Quick sim is also available.
-- **Tactics:** 6 formations, defensive/balanced/attacking mentality, pressing (low block, normal or high press) and tempo (patient, normal or direct). The **📋 Tactics** button during a match pauses the game so you can change formation, mentality, pressing, tempo and substitutions, and swap players' positions on the pitch by tapping one player and then another. AI teams chase games they're losing and protect leads late on. Tap players on the pitch and bench to swap them. Out-of-position players are penalised.
+- **Tactics:** 6 formations, defensive/balanced/attacking mentality, pressing (low block, normal or high press) and tempo (patient, normal or direct). The **📋 Tactics & subs** button during a match pauses the game and opens one panel where you can change formation, mentality, pressing, tempo and substitutions, and swap players' positions on the pitch by tapping one player and then another. AI teams chase games they're losing and protect leads late on. Tap players on the pitch and bench to swap them. Out-of-position players are penalised.
 - **Squad:** player ratings, potential, age, fitness, morale, injuries, and goals and assists.
 - **Transfers:** buy from rival clubs or sign free agents, take offers for your players, or release them. Players turn down clubs below their level.
 - **Finances:** wages, TV and commercial income, gate receipts and prize money. Going more than £5M into debt gets you fired.
