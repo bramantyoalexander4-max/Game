@@ -1060,7 +1060,7 @@
         userClub().budget += Math.round(gateIncome(userClub()) * (0.85 + rand() * 0.3));
       }
       m.injuries.filter((pid) => player(pid).club === G.userClub)
-        .forEach((pid) => pushNews(`🚑 ${pname(pid)} will be out for ${player(pid).injury} week(s).`));
+        .forEach((pid) => pushNews(`🚑 ${pname(pid)} will be out for ${player(pid).injury} week(s).`, pid));
     }
     // AI gate money (simplified)
     if (fx.home !== G.userClub) club(fx.home).budget += gateIncome(club(fx.home));
@@ -1094,7 +1094,7 @@
         if (p.ovr < p.pot && rand() < 0.035 * weekScale() * (1 + 0.2 * G.academy.level) * traitGrowth(p) * (p.pot - p.ovr) / 10) p.ovr++;
         return;
       }
-      if (p.injury > 0) { p.injury--; if (p.injury === 0 && p.club === G.userClub) pushNews(`✅ ${p.name} is back from injury.`); }
+      if (p.injury > 0) { p.injury--; if (p.injury === 0 && p.club === G.userClub) pushNews(`✅ ${p.name} is back from injury.`, p.id); }
       p.fitness = clamp(p.fitness + intensity.recover, 0, 100);
       // development during the season
       if (p.age <= 27 && p.ovr < p.pot && p.injury === 0) {
@@ -1102,9 +1102,9 @@
         if (rand() < chance) {
           p.ovr++;
           if (isWonderkid(p) && p.ovr >= 65 && p.ovr % 5 === 0) {
-            if (p.club === G.userClub) pushNews(`🌟 Wonderkid ${p.name} keeps getting better. He's now rated ${p.ovr}!`);
-            else if (rand() < 0.3) pushNews(`🌟 ${p.name} (${club(p.club).short}, ${p.age}) is the talk of the league, now rated ${p.ovr}.`);
-          } else if (p.club === G.userClub && rand() < 0.35) pushNews(`📈 ${p.name} is improving in training (now ${p.ovr}).`);
+            if (p.club === G.userClub) pushNews(`🌟 Wonderkid ${p.name} keeps getting better. He's now rated ${p.ovr}!`, p.id);
+            else if (rand() < 0.3) pushNews(`🌟 ${p.name} (${club(p.club).short}, ${p.age}) is the talk of the league, now rated ${p.ovr}.`, p.id);
+          } else if (p.club === G.userClub && rand() < 0.35) pushNews(`📈 ${p.name} is improving in training (now ${p.ovr}).`, p.id);
         }
       }
       // a benched wonderkid gets restless
@@ -1112,14 +1112,14 @@
         p.morale = clamp(p.morale - 3, 10, 100);
         if (p.morale < 40 && p.complained !== G.season) {
           p.complained = G.season;
-          pushNews(`😤 ${p.name} is frustrated by his lack of game time and wants first-team football.`);
+          pushNews(`😤 ${p.name} is frustrated by his lack of game time and wants first-team football.`, p.id);
         }
       }
       p.playTime = (p.playTime || 0) * 0.85;
       // training-ground knocks
       if (p.club === G.userClub && p.injury === 0 && rand() < 0.004 * weekScale() * intensity.injury) {
         p.injury = ri(1, 3);
-        pushNews(`🤕 ${p.name} picked up a knock in training (${p.injury} wk).`);
+        pushNews(`🤕 ${p.name} picked up a knock in training (${p.injury} wk).`, p.id);
       }
     });
     // wages & TV money
@@ -1132,9 +1132,9 @@
     // reminders about expiring deals and academy graduates
     if (G.mode !== 'national' && (G.week === Math.round(totalWeeks() / 3) || G.week === Math.round(totalWeeks() * 0.7))) {
       const exp = expiringPlayers();
-      if (exp.length) pushNews(`📝 ${exp.length} player(s) are in the final year of their contract: ${exp.slice(0, 4).map((p) => p.name).join(', ')}${exp.length > 4 ? '…' : ''}. They leave for free at season end.`);
+      if (exp.length) pushNews(`📝 ${exp.length} player(s) are in the final year of their contract: ${exp.slice(0, 4).map((p) => p.name).join(', ')}${exp.length > 4 ? '…' : ''}. They leave for free at season end.`, exp.slice(0, 4).map((p) => p.id));
       const grads = prospects().filter((p) => p.age >= ACADEMY_GRAD_AGE - 1);
-      if (grads.length) pushNews(`🎓 Decide on ${grads.map((p) => p.name).join(', ')}: academy players turning ${ACADEMY_GRAD_AGE} leave unless promoted.`);
+      if (grads.length) pushNews(`🎓 Decide on ${grads.map((p) => p.name).join(', ')}: academy players turning ${ACADEMY_GRAD_AGE} leave unless promoted.`, grads.map((p) => p.id));
     }
     aiTransferActivity();
     aiWonderkidRaid();
@@ -1556,7 +1556,7 @@
     addPlayer(p, u.id);
     p.contract = 3;
     G.legendsSigned[name] = { club: u.name, season: seasonName() };
-    pushNews(`👑 LEGEND SIGNED: ${name} (${def.pos}, ${def.ovr}) joins ${u.name} for ${cost} Legend Points!`);
+    pushNews(`👑 LEGEND SIGNED: ${name} (${def.pos}, ${def.ovr}) joins ${u.name} for ${cost} Legend Points!`, p.id);
     return { ok: true, pid: p.id };
   }
 
@@ -1595,7 +1595,7 @@
     if (userClub().budget < cost) return { ok: false, why: `A scout report costs ${money(cost)}.` };
     userClub().budget -= cost;
     p.scouted = true;
-    pushNews(`🔍 Scout report on ${p.name} (${p.age}): potential ${p.pot}, ${p.trait.toLowerCase()}.${isWonderkid(p) ? ' A genuine wonderkid!' : ''}`);
+    pushNews(`🔍 Scout report on ${p.name} (${p.age}): potential ${p.pot}, ${p.trait.toLowerCase()}.${isWonderkid(p) ? ' A genuine wonderkid!' : ''}`, p.id);
     return { ok: true };
   }
   function potentialRange(p) {
@@ -1629,7 +1629,7 @@
     p.contract = 3;
     p.wage = Math.max(1000, Math.round(wageFor(p) * 0.7 / 100) * 100);
     p.morale = 85;
-    pushNews(`🎓 ${p.name} promoted from the academy on a 3-season deal.`);
+    pushNews(`🎓 ${p.name} promoted from the academy on a 3-season deal.`, p.id);
     return { ok: true };
   }
   function releaseProspect(pid) {
@@ -1651,7 +1651,7 @@
       const b = weighted(bidders, (c) => Math.pow(c.rep - 40, 2));
       const amount = Math.round(val * (1.2 + rand() * 0.6) / 10000) * 10000;
       G.offers.push({ pid: p.id, club: b.id, amount, expires: G.week + 3 });
-      pushNews(`📨 ${b.name} have bid ${money(amount)} for ${p.name}. Respond on the Home screen.`);
+      pushNews(`📨 ${b.name} have bid ${money(amount)} for ${p.name}. Respond on the Home screen.`, p.id);
     });
   }
   function aiWonderkidRaid() {
@@ -1670,7 +1670,7 @@
     moveTo(p, b.id);
     b.budget -= fee; from.budget += fee;
     p.wage = signingWage(p); p.contract = 5;
-    pushNews(`💸 ${b.name} snap up wonderkid ${p.name} (${p.age}) from ${from.name} for ${money(fee)}.`);
+    pushNews(`💸 ${b.name} snap up wonderkid ${p.name} (${p.age}) from ${from.name} for ${money(fee)}.`, p.id);
   }
   function respondOffer(idx, accept) {
     const o = (G.offers || [])[idx];
@@ -1686,8 +1686,8 @@
     G.offers.splice(idx, 1);
     if (b.rep > userClub().rep + 3) {
       p.morale = clamp(p.morale - 12, 10, 100);
-      pushNews(`😟 ${p.name} is unsettled after you turned down ${b.name}.`);
-    } else pushNews(`🚫 Rejected ${b.name}'s bid for ${p.name}.`);
+      pushNews(`😟 ${p.name} is unsettled after you turned down ${b.name}.`, p.id);
+    } else pushNews(`🚫 Rejected ${b.name}'s bid for ${p.name}.`, p.id);
     return { ok: true };
   }
   function goldenBoy() {
@@ -1729,7 +1729,7 @@
       p.contract += years;
       p.wage = wage;
       p.morale = clamp(p.morale + (ratio > 1.05 ? 12 : 5), 0, 100);
-      pushNews(`📝 ${p.name} signs a new deal until season ${contractEnds(p)} (${money(wage)}/wk).`);
+      pushNews(`📝 ${p.name} signs a new deal until season ${contractEnds(p)} (${money(wage)}/wk).`, p.id);
       return { ok: true };
     }
     p.negBlock = { season: G.season, week: G.week + 3 };
@@ -1773,7 +1773,7 @@
     u.budget -= chk.fee;
     if (from !== null) club(from).budget += chk.fee;
     p.morale = 80;
-    pushNews(`✍️ Signed ${p.name} (${p.pos}, ${p.ovr}) ${from !== null ? 'from ' + club(from).name + ' for ' + money(chk.fee) : 'on a free transfer'}, contract until season ${contractEnds(p)}.`);
+    pushNews(`✍️ Signed ${p.name} (${p.pos}, ${p.ovr}) ${from !== null ? 'from ' + club(from).name + ' for ' + money(chk.fee) : 'on a free transfer'}, contract until season ${contractEnds(p)}.`, p.id);
     return { ok: true };
   }
   function moveTo(p, cid) {
@@ -1803,7 +1803,7 @@
     moveTo(p, offer.club);
     userClub().budget += offer.amount;
     club(offer.club).budget -= offer.amount;
-    pushNews(`💰 Sold ${p.name} to ${club(offer.club).name} for ${money(offer.amount)}.`);
+    pushNews(`💰 Sold ${p.name} to ${club(offer.club).name} for ${money(offer.amount)}.`, p.id);
     validateLineup(G.userClub);
   }
   function releaseCost(pid) {
@@ -1818,7 +1818,7 @@
     const cost = releaseCost(pid);
     userClub().budget -= cost;
     moveTo(p, null);
-    pushNews(`📤 Released ${p.name} (settlement ${money(cost)}).`);
+    pushNews(`📤 Released ${p.name} (settlement ${money(cost)}).`, p.id);
     validateLineup(G.userClub);
     return { ok: true };
   }
@@ -1845,7 +1845,7 @@
     if (from !== null) club(from).budget += fee;
     p.wage = signingWage(p);
     p.contract = signingLength(p);
-    pushNews(`🔄 ${buyer.name} sign ${p.name} (${p.pos}, ${p.ovr})${from !== null ? ' from ' + club(from).name + ' for ' + money(fee) : ' on a free'}.`);
+    pushNews(`🔄 ${buyer.name} sign ${p.name} (${p.pos}, ${p.ovr})${from !== null ? ' from ' + club(from).name + ' for ' + money(fee) : ' on a free'}.`, p.id);
   }
 
   // ---------- season end ----------
@@ -2040,7 +2040,7 @@
         - squadOf(G.userClub).filter((p) => p.pos === b).length / SQUAD_TEMPLATE[b])[0];
       const p = addPlayer(genPlayer(pos, userClub().rep - 10, 20, 30), G.userClub);
       p.contract = 1;
-      pushNews(`🆘 The board signed ${p.name} (${p.pos}, ${p.ovr}) on a 1-season deal to fill the squad.`);
+      pushNews(`🆘 The board signed ${p.name} (${p.pos}, ${p.ovr}) on a 1-season deal to fill the squad.`, p.id);
     }
     // refresh free agent pool
     while (G.freeAgents.length < 20) addPlayer(genPlayer(pick(['GK', 'DF', 'MF', 'FW']), ri(55, 72), 19, 32), null);
@@ -2072,8 +2072,12 @@
   }
 
   // ---------- helpers ----------
-  function pushNews(text) {
-    G.news.unshift({ season: G.season, week: G.week, text });
+  // pids: the players a message is about, so the inbox can link their names
+  function pushNews(text, pids) {
+    const x = { season: G.season, week: G.week, text };
+    const ids = (pids === undefined ? [] : [].concat(pids)).filter((id) => id !== undefined && id !== null);
+    if (ids.length) x.pids = ids;
+    G.news.unshift(x);
     if (G.news.length > 60) G.news.length = 60;
   }
   function money(v) {

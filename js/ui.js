@@ -436,7 +436,7 @@
           <button class="btn" data-a="skip-week">One week</button></div></div>`;
     }
     const injured = E.squadOf(n.id).filter((p) => p.injury);
-    const news = g.news.slice(0, 15).map((x) => `<div class="news"><small>S${x.season} W${x.week + 1}</small>${esc(x.text)}</div>`).join('');
+    const news = g.news.slice(0, 15).map((x) => newsItem(x, 'nat-player')).join('');
     return top + (injured.length && !g.gameOver ? `<div class="card small">🚑 Injured in your squad: ${injured.map((p) => esc(p.name)).join(', ')}</div>` : '')
       + `<div class="card small">${esc(E.intlOutlook())}</div>`
       + `<h2>Inbox</h2><div class="list">${news || '<div class="news muted">No news yet.</div>'}</div>`;
@@ -613,7 +613,7 @@
     }
     const last = g.week > 0 && !g.gameOver ? relevantFixtures(g.week - 1) : [];
     const lastHtml = last.length ? `<h2>Last week · ${esc(E.weekLabel(g.week - 1))}</h2><div class="list">${last.map(fxRow).join('')}</div>` : '';
-    const news = g.news.slice(0, 15).map((n) => `<div class="news"><small>S${n.season} W${n.week + 1}</small>${esc(n.text)}</div>`).join('');
+    const news = g.news.slice(0, 15).map((n) => newsItem(n)).join('');
     const offers = (g.offers || []).filter((o) => E.player(o.pid) && E.player(o.pid).club === g.userClub);
     const offersHtml = offers.length && !g.gameOver ? `<h2>📨 Transfer offers</h2>${offers.map((o) => {
       const p = E.player(o.pid), b = E.club(o.club), i = g.offers.indexOf(o);
@@ -747,6 +747,44 @@
         <div class="grow"><b>${labels[k]}</b><div class="small muted">${hint[k]}</div></div><b>${M(wages[k])}</b></div>`).join('')}</div>
       <div class="btns"><button class="btn" data-a="close">Cancel</button>
         <button class="btn primary" data-a="neg-offer" data-w="${wages[n.wage]}">Offer contract</button></div>`);
+  }
+  // inbox messages: player names become links that open the player's card
+  function newsItem(x, action = 'player') {
+    let html = esc(x.text);
+    let ids = (x.pids || []).filter((id) => E.player(id));
+    if (!x.pids) ids = legacyNewsPids(x.text);           // messages saved before ids were recorded
+    const links = [];
+    ids.forEach((id) => {
+      const name = esc(E.player(id).name), at = html.indexOf(name);
+      if (!name || at < 0) return;
+      links.push(`<span class="plink" data-a="${action}" data-id="${id}">${name}</span>`);
+      html = html.slice(0, at) + `\u0000${links.length - 1}\u0000` + html.slice(at + name.length);
+    });
+    html = html.replace(/\u0000(\d+)\u0000/g, (_, i) => links[+i]);
+    return `<div class="news"><small>S${x.season} W${x.week + 1}</small>${html}</div>`;
+  }
+  let nameIndex = null;
+  function legacyNewsPids(text) {
+    if (!nameIndex || nameIndex.g !== G()) {
+      const map = new Map(), me = G().userClub;
+      Object.values(G().players).forEach((p) => {
+        // prefer your own players when two share a name
+        if (!map.has(p.name) || p.club === me) map.set(p.name, p.id);
+      });
+      nameIndex = { g: G(), map };
+    }
+    const words = text.split(/[\s,.:;!?()]+/).filter(Boolean), found = [];
+    for (let i = 0; i < words.length; i++) {
+      for (let len = 4; len >= 1; len--) {
+        const cand = words.slice(i, i + len).join(' ');
+        // single words only count for your own squad, so ordinary words are not linked
+        const id = nameIndex.map.get(cand);
+        if (id !== undefined && (len > 1 || E.player(id).club === G().userClub) && /^\p{Lu}/u.test(cand) && !found.includes(id)) {
+          found.push(id); i += len - 1; break;
+        }
+      }
+    }
+    return found;
   }
   function playerModal(pid) {
     const p = E.player(pid);

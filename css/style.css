@@ -273,3 +273,7 @@ main.enter { animation: tabIn .22s ease-out; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* tappable player names in the inbox */
+.plink { color: var(--accent); font-weight: 600; cursor: pointer; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent); text-underline-offset: 3px; }
+.plink:active { opacity: .6; }
