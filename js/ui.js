@@ -914,7 +914,8 @@
       ${instrRows(m.instr[s].pressing, m.instr[s].tempo, 'm-instr')}
       <div class="btns"><button class="btn" data-a="m-subs">🔁 Substitutions (${5 - m.subs[s]} left)</button></div>
       <h2>On the pitch</h2>
-      ${pitchHtml(m.lineups[s], null, m.fit, 'noop')}`);
+      <p class="small muted" style="margin:4px">Tap a player, then another, to swap their positions. A player shown with his own position in brackets is playing out of position.</p>
+      ${pitchHtml(m.lineups[s], typeof ui.matchSwap === 'number' ? ui.matchSwap : null, m.fit, 'm-swap')}`);
   }
   function subsModal() {
     const m = ui.match;
@@ -1162,9 +1163,15 @@
       case 'm-speed': ui.matchSpeed = +d.s; renderMatch(); runClock(); break;
       case 'm-skip': clearInterval(ui.matchTimer); while (!ui.match.done) E.stepMatch(ui.match); renderMatch(); break;
       case 'm-ment': { const m = ui.match; m.ments[m.sides.indexOf(G().userClub)] = d.m; renderMatch(); break; }
-      case 'm-tactics': matchTacticsModal(); break;
+      case 'm-tactics': ui.matchSwap = null; matchTacticsModal(); break;
+      case 'm-swap': {
+        const m = ui.match, i = +d.i;
+        if (typeof ui.matchSwap !== 'number') ui.matchSwap = i;
+        else { if (ui.matchSwap !== i) E.swapMatchPositions(m, m.sides.indexOf(G().userClub), ui.matchSwap, i); ui.matchSwap = null; }
+        matchTacticsModal(); break;
+      }
       case 'm-tactics-done': closeModal(); ui.matchPaused = false; renderMatch(); runClock(); break;
-      case 'm-form': { const m = ui.match; E.setMatchFormation(m, m.sides.indexOf(G().userClub), d.f); matchTacticsModal(); break; }
+      case 'm-form': { const m = ui.match; ui.matchSwap = null; E.setMatchFormation(m, m.sides.indexOf(G().userClub), d.f); matchTacticsModal(); break; }
       case 'm-instr': { const m = ui.match; E.setMatchInstruction(m, m.sides.indexOf(G().userClub), d.k, d.v); matchTacticsModal(); break; }
       case 'instr': { E.userClub()[d.k] = d.v; save(); render(); break; }
       case 'noop': break;

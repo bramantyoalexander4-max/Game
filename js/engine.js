@@ -847,6 +847,17 @@
     ev(m, s, 'info', `📋 ${club(m.sides[s]).short} switch to ${formation}.`);
     return true;
   }
+  // swap two players' positions on the pitch (e.g. move a winger to striker and vice versa)
+  function swapMatchPositions(m, s, i, j) {
+    const lu = m.lineups[s];
+    if (i === j || !lu[i] || !lu[j]) return false;
+    const a = lu[i].pid, b = lu[j].pid;
+    lu[i] = { pid: b, slot: lu[i].slot };
+    lu[j] = { pid: a, slot: lu[j].slot };
+    m.dirty = true;
+    ev(m, s, 'info', `🔀 ${pname(a)} moves to ${lu[j].slot}, ${pname(b)} to ${lu[i].slot}.`);
+    return true;
+  }
   function setMatchInstruction(m, s, key, value) {
     if (key === 'mentality' && MENTALITY[value]) m.ments[s] = value;
     else if (key === 'pressing' && PRESSING[value]) m.instr[s].pressing = value;
@@ -2153,7 +2164,7 @@
   }
 
   root.Engine = {
-    CLUBS, datasets, getDataset, FORMATIONS, MENTALITY, PRESSING, TEMPO, setMatchFormation, setMatchInstruction, INTENSITY, POS_ORDER, MIN_SQUAD, MAX_SQUAD,
+    CLUBS, datasets, getDataset, FORMATIONS, MENTALITY, PRESSING, TEMPO, setMatchFormation, setMatchInstruction, swapMatchPositions, INTENSITY, POS_ORDER, MIN_SQUAD, MAX_SQUAD,
     get state() { return G; },
     newGame, load, serialize,
     club, player, squadOf, userClub, totalWeeks, fixturesForWeek, userFixture,
