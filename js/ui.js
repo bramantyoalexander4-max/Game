@@ -583,6 +583,16 @@
         <div style="margin:2px auto 0;width:40px">${bar(fit)}</div></div>`;
     }).join('')}</div>`;
   }
+  const INSTR_HELP = {
+    pressing: 'High press wins the ball higher up and blunts their attack, but tires your players faster. A low block is solid and saves legs.',
+    tempo: 'Direct play creates more chances for both sides; patient play slows the game down and keeps you compact.',
+  };
+  function instrRows(pressing, tempo, action) {
+    const row = (key, table, cur) => `<div class="btns" style="margin-bottom:4px">${Object.entries(table).map(([k, v]) =>
+      `<button class="btn ${cur === k ? 'on' : ''}" data-a="${action}" data-k="${key}" data-v="${k}">${v.label}</button>`).join('')}</div>
+      <p class="small muted" style="margin:0 4px 10px">${INSTR_HELP[key]}</p>`;
+    return `<h2>Pressing</h2>${row('pressing', E.PRESSING, pressing)}<h2>Tempo</h2>${row('tempo', E.TEMPO, tempo)}`;
+  }
   function viewTactics() {
     const c = E.userClub();
     const lineup = E.validateLineup(c.id);
@@ -596,6 +606,7 @@
       <div class="chips">${Object.keys(E.FORMATIONS).map((f) => `<button class="btn ${c.formation === f ? 'on' : ''}" data-a="formation" data-f="${f}">${f}</button>`).join('')}</div>
       <h2>Mentality</h2>
       <div class="btns" style="margin-bottom:12px">${Object.keys(E.MENTALITY).map((m) => `<button class="btn ${c.mentality === m ? 'on' : ''}" data-a="mentality" data-m="${m}">${m[0].toUpperCase() + m.slice(1)}</button>`).join('')}</div>
+      ${instrRows(c.pressing || 'normal', c.tempo || 'normal', 'instr')}
       <div class="card stats3"><div><b>${s.att}</b><span class="small muted">Attack</span></div><div><b>${s.mid}</b><span class="small muted">Midfield</span></div><div><b>${s.def}</b><span class="small muted">Defence</span></div></div>
       <div class="row between"><p class="small muted" style="margin:4px">Tap a player, then tap another (on the pitch or bench) to swap.</p>
         <button class="btn" data-a="auto-pick">Auto pick</button></div>
@@ -874,7 +885,7 @@
           <button class="btn ${ui.matchPaused ? 'on' : ''}" data-a="m-pause">${ui.matchPaused ? '▶ Resume' : '⏸ Pause'}</button>
           ${[1, 2, 4].map((s) => `<button class="btn ${ui.matchSpeed === s ? 'on' : ''}" data-a="m-speed" data-s="${s}">${s}x</button>`).join('')}
           <button class="btn" data-a="m-skip">⏭ End</button></div>
-        <div class="btns">${Object.keys(E.MENTALITY).map((k) => `<button class="btn ${m.ments[me] === k ? 'on' : ''}" data-a="m-ment" data-m="${k}">${k[0].toUpperCase() + k.slice(1, 3)}</button>`).join('')}
+        <div class="btns"><button class="btn" data-a="m-tactics">📋 Tactics · ${m.formations[me]} · ${m.ments[me][0].toUpperCase() + m.ments[me].slice(1, 3)}</button>
           <button class="btn" data-a="m-subs">🔁 Subs (${5 - m.subs[me]})</button></div>`;
     el.innerHTML = `<div class="inner">
       <div class="scoreboard">
@@ -888,6 +899,22 @@
       </div>
       <div class="feed">${feed}</div>
       <div class="controls">${controls}</div></div>`;
+  }
+  function matchTacticsModal() {
+    const m = ui.match;
+    const s = m.sides.indexOf(G().userClub);
+    ui.matchPaused = true; clearInterval(ui.matchTimer); renderMatch();
+    const score = `${m.score[s]}-${m.score[1 - s]}`;
+    openModal(`<div class="row between"><b>In-match tactics · ${m.min}' · ${score}</b><button class="btn" data-a="m-tactics-done">▶ Resume</button></div>
+      <p class="small muted">The match is paused. Changes take effect straight away; formation changes move the players on the pitch into their best slots.</p>
+      <h2>Formation</h2>
+      <div class="chips">${Object.keys(E.FORMATIONS).map((f) => `<button class="btn ${m.formations[s] === f ? 'on' : ''}" data-a="m-form" data-f="${f}">${f}</button>`).join('')}</div>
+      <h2>Mentality</h2>
+      <div class="btns" style="margin-bottom:4px">${Object.keys(E.MENTALITY).map((k) => `<button class="btn ${m.ments[s] === k ? 'on' : ''}" data-a="m-instr" data-k="mentality" data-v="${k}">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div>
+      ${instrRows(m.instr[s].pressing, m.instr[s].tempo, 'm-instr')}
+      <div class="btns"><button class="btn" data-a="m-subs">🔁 Substitutions (${5 - m.subs[s]} left)</button></div>
+      <h2>On the pitch</h2>
+      ${pitchHtml(m.lineups[s], null, m.fit, 'noop')}`);
   }
   function subsModal() {
     const m = ui.match;
@@ -1135,6 +1162,12 @@
       case 'm-speed': ui.matchSpeed = +d.s; renderMatch(); runClock(); break;
       case 'm-skip': clearInterval(ui.matchTimer); while (!ui.match.done) E.stepMatch(ui.match); renderMatch(); break;
       case 'm-ment': { const m = ui.match; m.ments[m.sides.indexOf(G().userClub)] = d.m; renderMatch(); break; }
+      case 'm-tactics': matchTacticsModal(); break;
+      case 'm-tactics-done': closeModal(); ui.matchPaused = false; renderMatch(); runClock(); break;
+      case 'm-form': { const m = ui.match; E.setMatchFormation(m, m.sides.indexOf(G().userClub), d.f); matchTacticsModal(); break; }
+      case 'm-instr': { const m = ui.match; E.setMatchInstruction(m, m.sides.indexOf(G().userClub), d.k, d.v); matchTacticsModal(); break; }
+      case 'instr': { E.userClub()[d.k] = d.v; save(); render(); break; }
+      case 'noop': break;
       case 'm-subs': ui.matchSel = null; subsModal(); break;
       case 'm-out': ui.matchSel = +d.id; subsModal(); break;
       case 'm-in': {

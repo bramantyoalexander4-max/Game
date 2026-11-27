@@ -78,6 +78,17 @@
     balanced: { att: 1, def: 1 },
     attacking: { att: 1.07, def: 0.94 },
   };
+  // team instructions: pressing and tempo (applied to the match strength, chance rate and fatigue)
+  const PRESSING = {
+    low: { mid: 0.97, def: 1.03, oppAtt: 1, fatigue: 0.8, label: 'Low block' },
+    normal: { mid: 1, def: 1, oppAtt: 1, fatigue: 1, label: 'Normal' },
+    high: { mid: 1.04, def: 0.98, oppAtt: 0.97, fatigue: 1.35, label: 'High press' },
+  };
+  const TEMPO = {
+    slow: { att: 0.98, def: 1.02, chances: 0.88, label: 'Patient' },
+    normal: { att: 1, def: 1, chances: 1, label: 'Normal' },
+    fast: { att: 1.03, def: 0.98, chances: 1.12, label: 'Direct' },
+  };
   const INTENSITY = {
     light: { recover: 24, growth: 0.7, injury: 0.5 },
     normal: { recover: 18, growth: 1, injury: 1 },
@@ -744,7 +755,7 @@
     }
     return c.lineup;
   }
-  function strength(lineup, mentality, fitMap, home) {
+  function strength(lineup, mentality, fitMap, home, instr) {
     const by = { GK: [], DF: [], MF: [], FW: [] };
     lineup.forEach((l) => {
       const p = player(l.pid);
@@ -759,11 +770,13 @@
     let def = (0.6 * avg(by.DF) + 0.4 * gk) * (1 + 0.035 * (n.DF - 4) + 0.01 * (n.MF - 4)) * m.def;
     const short = 1 - 0.07 * Math.max(0, 11 - lineup.length); // red cards
     const h = home ? 1.03 : 1;
+    const pr = PRESSING[(instr && instr.pressing) || 'normal'], tp = TEMPO[(instr && instr.tempo) || 'normal'];
+    att *= tp.att; mid *= pr.mid; def *= pr.def * tp.def;
     return { att: att * short * h, mid: mid * short * h, def: def * short * h };
   }
   function clubStrength(cid) {
     const c = club(cid);
-    const s = strength(validateLineup(cid), c.mentality);
+    const s = strength(validateLineup(cid), c.mentality, null, false, { pressing: c.pressing, tempo: c.tempo });
     return Math.round((s.att + s.mid + s.def) / 3);
   }
 
@@ -775,6 +788,8 @@
       lineups: sides.map((cid) => validateLineup(cid).map((l) => ({ ...l }))),
       fit: {}, subs: [0, 0], usedSubs: [[], []], yellows: {}, injuries: [],
       ments: sides.map((cid) => club(cid).mentality),
+      instr: sides.map((cid) => ({ pressing: club(cid).pressing || 'normal', tempo: club(cid).tempo || 'normal' })),
+      formations: sides.map((cid) => club(cid).formation),
       shots: [0, 0], onTarget: [0, 0], possTicks: [0, 0], scorers: [], assists: [], appeared: new Set(),
     };
     sides.forEach((cid) => squadOf(cid).forEach((p) => { m.fit[p.id] = p.fitness; }));
@@ -806,6 +821,40 @@
   function bestBench(m, s, slot) {
     return benchOf(m, s).sort((a, b) => slotRating(b, slot, m.fit[b.id]) - slotRating(a, slot, m.fit[a.id]))[0];
   }
+  // the AI changes approach late on: chase a deficit, protect a lead
+  function aiInMatchTactics(m, s) {
+    if (m.min !== 60 && m.min !== 75) return;
+    const diff = m.score[s] - m.score[1 - s];
+    if (diff < 0) { m.ments[s] = 'attacking'; m.instr[s] = { pressing: 'high', tempo: 'fast' }; }
+    else if (diff >= 2 || (diff === 1 && m.min === 75)) { m.ments[s] = 'defensive'; m.instr[s] = { pressing: 'low', tempo: 'slow' }; }
+  }
+  // move the players on the pitch into a new formation, each to the slot that suits him best
+  function setMatchFormation(m, s, formation) {
+    if (!FORMATIONS[formation]) return false;
+    const onPitch = m.lineups[s].map((l) => player(l.pid));
+    const slots = slotsFor(formation).slice(0, onPitch.length);
+    const gk = onPitch.find((p) => m.lineups[s].find((l) => l.pid === p.id).slot === 'GK');
+    const lineup = [];
+    const used = new Set();
+    if (gk && slots[0] === 'GK') { lineup.push({ pid: gk.id, slot: 'GK' }); used.add(gk.id); }
+    slots.slice(lineup.length).forEach((slot) => {
+      const best = onPitch.filter((p) => !used.has(p.id)).sort((a, b) => slotRating(b, slot, m.fit[b.id]) - slotRating(a, slot, m.fit[a.id]))[0];
+      if (best) { used.add(best.id); lineup.push({ pid: best.id, slot }); }
+    });
+    m.lineups[s] = lineup;
+    m.formations[s] = formation;
+    m.dirty = true;
+    ev(m, s, 'info', `📋 ${club(m.sides[s]).short} switch to ${formation}.`);
+    return true;
+  }
+  function setMatchInstruction(m, s, key, value) {
+    if (key === 'mentality' && MENTALITY[value]) m.ments[s] = value;
+    else if (key === 'pressing' && PRESSING[value]) m.instr[s].pressing = value;
+    else if (key === 'tempo' && TEMPO[value]) m.instr[s].tempo = value;
+    else return false;
+    m.dirty = true;
+    return true;
+  }
   function aiSubs(m, s) {
     if (![58, 68, 78].includes(m.min)) return;
     const tired = m.lineups[s].filter((l) => l.slot !== 'GK')
@@ -820,16 +869,20 @@
     if (m.done) return m;
     m.min++;
     // team strength changes slowly (fatigue) or on events (subs, cards, injuries): recompute every 10 minutes or when dirty
-    if (!m.st || m.dirty || m.min % 10 === 1 || m.stMents !== m.ments.join()) {
-      m.st = m.lineups.map((lu, s) => strength(lu, m.ments[s], m.fit, s === 0));
-      m.stMents = m.ments.join(); m.dirty = false;
+    const key = m.ments.join() + JSON.stringify(m.instr || []);
+    if (!m.st || m.dirty || m.min % 10 === 1 || m.stMents !== key) {
+      m.st = m.lineups.map((lu, s) => strength(lu, m.ments[s], m.fit, s === 0, m.instr && m.instr[s]));
+      // a high press also blunts the other side's attack
+      if (m.instr) [0, 1].forEach((s) => { m.st[1 - s].att *= PRESSING[m.instr[s].pressing].oppAtt; });
+      m.stMents = key; m.dirty = false;
     }
     const st = m.st;
     // possession
     const pm = Math.pow(st[0].mid, 4) / (Math.pow(st[0].mid, 4) + Math.pow(st[1].mid, 4));
     m.possTicks[rand() < pm ? 0 : 1]++;
     // chances
-    if (rand() < 0.145) {
+    const tempoRate = m.instr ? (TEMPO[m.instr[0].tempo].chances + TEMPO[m.instr[1].tempo].chances) / 2 : 1;
+    if (rand() < 0.145 * tempoRate) {
       const w0 = pm * st[0].att / st[1].def, w1 = (1 - pm) * st[1].att / st[0].def;
       const s = rand() < w0 / (w0 + w1) ? 0 : 1, o = 1 - s;
       const ratio = st[s].att / st[o].def;
@@ -886,10 +939,13 @@
     }
     // fatigue, applied in five-minute steps
     if (m.min % 5 === 0) {
-      for (const lu of m.lineups) for (const l of lu) m.fit[l.pid] = Math.max(20, m.fit[l.pid] - (l.slot === 'GK' ? 0.3 : 1));
+      m.lineups.forEach((lu, s) => {
+        const f = m.instr ? PRESSING[m.instr[s].pressing].fatigue : 1;
+        for (const l of lu) m.fit[l.pid] = Math.max(20, m.fit[l.pid] - (l.slot === 'GK' ? 0.3 : 1) * f);
+      });
     }
     // AI substitutions (the user's side too when they choose to sim)
-    [0, 1].forEach((s) => { if (m.sides[s] !== G.userClub || opts.autoUser) aiSubs(m, s); });
+    [0, 1].forEach((s) => { if (m.sides[s] !== G.userClub || opts.autoUser) { aiSubs(m, s); aiInMatchTactics(m, s); } });
     if (m.min === 45) ev(m, -1, 'info', `⏸ Half-time: ${m.score[0]}-${m.score[1]}`);
     if (m.min >= 90) {
       if (m.fx.ko && m.score[0] === m.score[1]) shootout(m);
@@ -2097,7 +2153,7 @@
   }
 
   root.Engine = {
-    CLUBS, datasets, getDataset, FORMATIONS, MENTALITY, INTENSITY, POS_ORDER, MIN_SQUAD, MAX_SQUAD,
+    CLUBS, datasets, getDataset, FORMATIONS, MENTALITY, PRESSING, TEMPO, setMatchFormation, setMatchInstruction, INTENSITY, POS_ORDER, MIN_SQUAD, MAX_SQUAD,
     get state() { return G; },
     newGame, load, serialize,
     club, player, squadOf, userClub, totalWeeks, fixturesForWeek, userFixture,
