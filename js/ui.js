@@ -67,7 +67,7 @@
   }
   // ---------- device preferences (kept apart from the career save) ----------
   const PREF_KEY = 'touchline-prefs';
-  const prefs = (() => { try { return { vibrate: true, sound: true, ...JSON.parse(localStorage.getItem(PREF_KEY) || '{}') }; } catch (e) { return { vibrate: true, sound: true }; } })();
+  const prefs = (() => { try { return { vibrate: true, sound: true, music: true, ...JSON.parse(localStorage.getItem(PREF_KEY) || '{}') }; } catch (e) { return { vibrate: true, sound: true, music: true }; } })();
   const savePrefs = () => { try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch (e) { /* ignore */ } };
   // vibrate: the Android app exposes a native bridge; browsers fall back to the Vibration API
   function buzz(pattern) {
@@ -80,8 +80,8 @@
   // ---------- match sounds: synthesized with Web Audio, so no audio files are shipped ----------
   const Sfx = (() => {
     let ctx = null, master = null, noise = null, amb = null;
-    function init() {
-      if (!prefs.sound) return null;
+    function init(force) {
+      if (!prefs.sound && !force) return null;
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return null;
       if (!ctx) {
@@ -142,6 +142,8 @@
     }
     return {
       unlock() { init(); },
+      context() { return init(true); },
+      out() { return master; },
       // the steady murmur of the stadium while a live match is on
       startAmbience() {
         if (!init() || amb) return;
@@ -191,6 +193,82 @@
     };
   })();
   document.addEventListener('visibilitychange', () => Sfx.pause(document.hidden));
+
+  // ---------- menu music: a generative loop played on the menu screens ----------
+  const Music = (() => {
+    const BPM = 92, STEP = 60 / BPM / 2;            // eighth notes
+    // I - V - vi - IV in D major; each chord lasts one bar (8 steps)
+    const CHORDS = [[50, 54, 57], [57, 61, 64], [59, 62, 66], [55, 59, 62]];
+    const SCALE = [62, 64, 66, 69, 71, 74, 76, 78];  // D major pentatonic, for the melody
+    const hz = (n) => 440 * Math.pow(2, (n - 69) / 12);
+    let ctx = null, bus = null, timer = null, next = 0, step = 0, phrase = [];
+    function voice(type, freq, t, dur, vol, cutoff, attack = 0.01) {
+      const o = ctx.createOscillator(), g = ctx.createGain(), f = ctx.createBiquadFilter();
+      o.type = type; o.frequency.value = freq; f.type = 'lowpass'; f.frequency.value = cutoff;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + attack);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(f); f.connect(g); g.connect(bus); o.start(t); o.stop(t + dur + 0.05);
+    }
+    function drum(t, kick) {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      if (kick) { o.frequency.setValueAtTime(120, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.18); }
+      else { o.type = 'square'; o.frequency.value = 7000; }
+      const v = kick ? 0.5 : 0.025, d = kick ? 0.25 : 0.04;
+      g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+      o.connect(g); g.connect(bus); o.start(t); o.stop(t + d + 0.02);
+    }
+    // a new 4-bar melody each time round, so the loop never sounds quite the same
+    function newPhrase() {
+      phrase = [];
+      let i = 3;
+      for (let k = 0; k < 32; k++) {
+        if (k % 2 === 1 && Math.random() < 0.55) { phrase.push(null); continue; }
+        i = Math.max(0, Math.min(SCALE.length - 1, i + [-2, -1, -1, 0, 1, 1, 2][Math.floor(Math.random() * 7)]));
+        phrase.push(Math.random() < 0.22 ? null : SCALE[i]);
+      }
+    }
+    function schedule() {
+      while (next < ctx.currentTime + 0.3) {
+        const bar = Math.floor(step / 8) % 4, beat = step % 8, chord = CHORDS[bar];
+        if (step % 32 === 0) newPhrase();
+        if (beat === 0) {
+          // warm pad: two detuned saws per chord note, slow attack
+          chord.forEach((n) => [-6, 6].forEach((c) => voice('sawtooth', hz(n) * Math.pow(2, c / 1200), next, STEP * 8.4, 0.018, 900, 0.4)));
+        }
+        if (beat % 2 === 0) voice('triangle', hz(chord[0] - 12), next, STEP * 1.8, 0.11, 400);   // bass
+        voice('triangle', hz(chord[step % 3] + 12), next, STEP * 0.9, 0.025, 2500);              // soft arpeggio
+        const mel = phrase[step % 32];
+        if (mel) voice('square', hz(mel), next, STEP * 1.7, 0.03, 1800, 0.02);                    // melody
+        if (beat === 0 || beat === 4) drum(next, true);
+        if (beat % 2 === 1) drum(next, false);
+        next += STEP; step++;
+      }
+    }
+    return {
+      playing: () => !!timer,
+      start() {
+        if (timer || !prefs.music) return;
+        ctx = Sfx.context();
+        if (!ctx) return;
+        bus = ctx.createGain(); bus.gain.value = 0.0001; bus.connect(Sfx.out());
+        bus.gain.exponentialRampToValueAtTime(0.5, ctx.currentTime + 2);
+        next = ctx.currentTime + 0.1; step = 0;
+        timer = setInterval(schedule, 100); schedule();
+      },
+      stop() {
+        if (!timer) return;
+        clearInterval(timer); timer = null;
+        const b = bus; bus = null;
+        b.gain.cancelScheduledValues(ctx.currentTime);
+        b.gain.setValueAtTime(Math.max(0.0001, b.gain.value), ctx.currentTime);
+        b.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.6);
+        setTimeout(() => b.disconnect(), 1500);
+      },
+    };
+  })();
+  // browsers only allow audio after a tap, so the music starts on the first tap on a menu screen
+  const onMenu = () => !document.getElementById('match');
+  document.addEventListener('click', () => setTimeout(() => { if (onMenu() && !document.hidden) Music.start(); }, 0));
   // colour-code every rating badge: elite, very good, good, squad
   function tierRatings(root) {
     root.querySelectorAll('.ovr').forEach((el) => {
@@ -297,7 +375,8 @@
     if (main && ui.lastTab !== ui.tab) { main.classList.add('enter'); ui.lastTab = ui.tab; }
   }
   const vibrateToggle = () => `<button class="btn" data-a="toggle-vibrate">📳 Vibrate on goals: ${prefs.vibrate ? 'On' : 'Off'}</button>
-    <button class="btn" data-a="toggle-sound">🔊 Match sounds: ${prefs.sound ? 'On' : 'Off'}</button>`;
+    <button class="btn" data-a="toggle-sound">🔊 Match sounds: ${prefs.sound ? 'On' : 'Off'}</button>
+    <button class="btn" data-a="toggle-music">🎵 Menu music: ${prefs.music ? 'On' : 'Off'}</button>`;
 
   // ---------- national team career ----------
   function renderNational() {
@@ -998,7 +1077,7 @@
       while (!m.done) E.stepMatch(m, { autoUser: true });
       return finishMatch();
     }
-    Sfx.startAmbience(); Sfx.kickoff();
+    Music.stop(); Sfx.startAmbience(); Sfx.kickoff();
     renderMatch();
     runClock();
   }
@@ -1331,6 +1410,7 @@
       }
       case 'training': G().training = d.k; render(); break;
       case 'save': save(); toast('Game saved.'); break;
+      case 'toggle-music': prefs.music = !prefs.music; savePrefs(); if (prefs.music) Music.start(); else Music.stop(); render(); break;
       case 'toggle-sound': prefs.sound = !prefs.sound; savePrefs(); if (!prefs.sound) Sfx.stopAmbience(); else Sfx.kickoff(); render(); break;
       case 'toggle-vibrate': prefs.vibrate = !prefs.vibrate; savePrefs(); if (prefs.vibrate) buzz([60]); render(); break;
       // match controls
