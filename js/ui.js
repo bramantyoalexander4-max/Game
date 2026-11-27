@@ -869,7 +869,7 @@
       <div class="btns" style="margin-bottom:12px">${Object.keys(E.MENTALITY).map((m) => `<button class="btn ${c.mentality === m ? 'on' : ''}" data-a="mentality" data-m="${m}">${m[0].toUpperCase() + m.slice(1)}</button>`).join('')}</div>
       ${instrRows(c.pressing || 'normal', c.tempo || 'normal', 'instr')}
       <div class="card stats3"><div><b>${s.att}</b><span class="small muted">Attack</span></div><div><b>${s.mid}</b><span class="small muted">Midfield</span></div><div><b>${s.def}</b><span class="small muted">Defence</span></div></div>
-      <div class="row between"><p class="small muted" style="margin:4px">Tap a player, then tap another (on the pitch or bench) to swap.</p>
+      <div class="row between"><p class="small muted" style="margin:4px">Drag a player onto another to swap them (hold a bench player briefly, then drag), or tap one and then the other.</p>
         <button class="btn" data-a="auto-pick">Auto pick</button></div>
       ${pitchHtml(lineup, selIdx, null, 'xi')}
       <h2>Bench & reserves</h2>
@@ -1203,7 +1203,7 @@
     const bench = E.benchOf(m, s).sort((a, b) => E.POS_ORDER[a.pos] - E.POS_ORDER[b.pos] || b.ovr - a.ovr);
     const hint = selP
       ? `<b>${esc(selP.name)}</b> selected: tap another player on the pitch to swap positions${left ? ', or a substitute below to bring him off' : ''}.`
-      : 'Tap a player on the pitch, then another player to swap positions, or a substitute to bring him on.';
+      : 'Drag a player onto another to swap positions, or drag a substitute onto the player he replaces. Tapping one and then the other works too.';
     openModal(`<div class="row between"><b>Tactics &amp; subs · ${m.min}' · ${score}</b><button class="btn primary" data-a="m-tactics-done">▶ Resume</button></div>
       <p class="small muted" style="margin:6px 0">The match is paused while this panel is open.</p>
       <div class="wkcard small" style="margin:6px 0">${hint}</div>
@@ -1309,8 +1309,11 @@
 
   // ---------- events ----------
   document.addEventListener('click', (e) => {
+    if (Date.now() < drag.blockClickUntil) { e.preventDefault(); return; }
     const t = e.target.closest('[data-a]');
-    if (!t) return;
+    if (t) act(t);
+  });
+  function act(t) {
     const a = t.dataset.a, d = t.dataset;
     switch (a) {
       case 'continue':
@@ -1481,7 +1484,105 @@
       case 'next-week': nextWeek(); break;
       default: break;
     }
+  }
+
+  // ---------- drag and drop: move players around the pitch, or drag a substitute onto it ----------
+  // A drop replays "tap the first player, tap the second" through act(), so dragging and tapping
+  // share the same swap and substitution rules.
+  const PITCH_ACTIONS = ['xi', 'm-swap'], BENCH_ACTIONS = ['bench', 'm-in'];
+  const DRAGGABLE = [...PITCH_ACTIONS, ...BENCH_ACTIONS].map((x) => `[data-a="${x}"]`).join(',');
+  const drag = { blockClickUntil: 0, src: null, ghost: null, over: null, active: false, timer: null, raf: 0, x: 0, y: 0 };
+  const keyOf = (el) => ({ a: el.dataset.a, i: el.dataset.i, id: el.dataset.id });
+  const findEl = (k) => document.querySelector(`[data-a="${k.a}"]${k.i !== undefined ? `[data-i="${k.i}"]` : `[data-id="${k.id}"]`}`);
+  const isPitch = (k) => PITCH_ACTIONS.includes(k.a);
+  function clearSelection() { ui.tacticSel = null; ui.matchSwap = null; }
+  function dragStart() {
+    const el = drag.src.el, r = el.getBoundingClientRect();
+    drag.active = true;
+    const g = el.cloneNode(true);
+    g.classList.add('drag-ghost'); g.classList.remove('sel');
+    g.style.width = r.width + 'px'; g.style.left = '0'; g.style.top = '0';
+    document.body.appendChild(g);
+    drag.ghost = g; drag.dx = drag.src.x0 - r.left; drag.dy = drag.src.y0 - r.top;
+    el.classList.add('drag-src');
+    document.body.classList.add('dragging');
+    buzz([15]);
+    moveGhost();
+    autoScroll();
+  }
+  function moveGhost() {
+    if (!drag.ghost) return;
+    drag.ghost.style.transform = `translate(${drag.x - drag.dx}px, ${drag.y - drag.dy}px) scale(1.08)`;
+    const under = document.elementFromPoint(drag.x, drag.y);
+    const t = under && under.closest(DRAGGABLE);
+    const ok = t && t !== drag.src.el && (isPitch(keyOf(t)) || isPitch(drag.src.k)) && t.dataset.a.startsWith('m-') === drag.src.k.a.startsWith('m-');
+    if (drag.over && drag.over !== t) drag.over.classList.remove('drop-hover');
+    drag.over = ok ? t : null;
+    if (drag.over) drag.over.classList.add('drop-hover');
+  }
+  // scroll the page (or the open panel) when the finger is near the top or bottom edge
+  function autoScroll() {
+    cancelAnimationFrame(drag.raf);
+    if (!drag.active) return;
+    const box = drag.src.el.closest('.modal-box') || document.scrollingElement;
+    const top = box === document.scrollingElement ? 0 : box.getBoundingClientRect().top;
+    const bottom = box === document.scrollingElement ? innerHeight : box.getBoundingClientRect().bottom;
+    const edge = 80;
+    const v = drag.y < top + edge ? -Math.ceil((top + edge - drag.y) / 6) : drag.y > bottom - edge ? Math.ceil((drag.y - bottom + edge) / 6) : 0;
+    if (v) { box.scrollTop += v; moveGhost(); }
+    drag.raf = requestAnimationFrame(autoScroll);
+  }
+  function dragEnd(drop) {
+    clearTimeout(drag.timer);
+    cancelAnimationFrame(drag.raf);
+    const src = drag.src, target = drag.over;
+    if (drag.ghost) drag.ghost.remove();
+    if (src) src.el.classList.remove('drag-src');
+    if (target) target.classList.remove('drop-hover');
+    document.body.classList.remove('dragging');
+    const was = drag.active;
+    Object.assign(drag, { src: null, ghost: null, over: null, active: false });
+    if (!was) return;
+    drag.blockClickUntil = Date.now() + 350;
+    if (!drop || !target) return;
+    // pitch player first, then the other one: that is the order the tap rules expect for substitutions
+    let first = src.k, second = keyOf(target);
+    if (!isPitch(first)) [first, second] = [second, first];
+    clearSelection();
+    const a = findEl(first);
+    if (!a) return;
+    act(a);
+    const b = findEl(second);
+    if (b) act(b); else clearSelection();
+  }
+  document.addEventListener('pointerdown', (e) => {
+    if (e.button > 0 || drag.src) return;
+    const el = e.target.closest(DRAGGABLE);
+    if (!el) return;
+    const k = keyOf(el);
+    drag.src = { el, k, x0: e.clientX, y0: e.clientY, id: e.pointerId };
+    drag.x = e.clientX; drag.y = e.clientY;
+    // players on the pitch drag straight away; list rows need a short press so the list still scrolls
+    if (!isPitch(k) && e.pointerType !== 'mouse') drag.timer = setTimeout(() => { if (drag.src && !drag.active) dragStart(); }, 280);
   });
+  document.addEventListener('pointermove', (e) => {
+    if (!drag.src || e.pointerId !== drag.src.id) return;
+    drag.x = e.clientX; drag.y = e.clientY;
+    if (!drag.active) {
+      const moved = Math.hypot(e.clientX - drag.src.x0, e.clientY - drag.src.y0);
+      if (moved > 8) {
+        if (isPitch(drag.src.k) || e.pointerType === 'mouse') dragStart();
+        else { clearTimeout(drag.timer); drag.src = null; }   // a scroll, not a drag
+      }
+      return;
+    }
+    moveGhost();
+  });
+  document.addEventListener('pointerup', (e) => { if (drag.src && e.pointerId === drag.src.id) dragEnd(true); });
+  document.addEventListener('pointercancel', () => { if (drag.src) dragEnd(false); });
+  // stop the page scrolling under the finger while a player is being dragged
+  document.addEventListener('touchmove', (e) => { if (drag.active) e.preventDefault(); }, { passive: false });
+  document.addEventListener('contextmenu', (e) => { if (drag.src) e.preventDefault(); });
   document.addEventListener('input', (e) => {
     if (e.target.id === 'mname') ui.mname = e.target.value;
     if (e.target.id === 'pq') {
